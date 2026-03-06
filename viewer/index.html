@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Session Log Viewer</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="title-wrap">
+        <h1>Session Log Viewer</h1>
+        <p>Prompt-by-prompt history with tool actions, metadata, search, and comparison</p>
+      </div>
+      <div class="controls-row">
+        <button id="refreshButton" type="button">Refresh Log Directory</button>
+        <label class="file-label" for="uploadInput">Load JSONL File(s)</label>
+        <input id="uploadInput" type="file" accept=".jsonl,.txt" multiple />
+        <input
+          id="searchInput"
+          type="search"
+          placeholder="Search prompts, actions, file paths, or raw content"
+          autocomplete="off"
+        />
+        <div id="searchHits" class="search-hits" hidden>
+          <span id="searchHitCount">0 hits</span>
+          <button id="searchPrevButton" type="button" title="Previous search hit" aria-label="Previous search hit">▲</button>
+          <button id="searchNextButton" type="button" title="Next search hit" aria-label="Next search hit">▼</button>
+        </div>
+        <label class="toggle-label" for="lineNumbersToggle">
+          <input id="lineNumbersToggle" type="checkbox" />
+          Show line numbers
+        </label>
+        <label class="toggle-label" for="syncDiffToggle">
+          <input id="syncDiffToggle" type="checkbox" />
+          Sync code pane scroll
+        </label>
+        <button id="compareButton" type="button">Enable Compare</button>
+      </div>
+    </header>
+
+    <div class="layout">
+      <aside class="sidebar">
+        <h2>Log Directory Files</h2>
+        <div class="dir-controls">
+          <button id="chooseDirButton" type="button">Choose Directory...</button>
+          <input id="directoryInput" type="file" webkitdirectory directory multiple />
+        </div>
+        <p class="sidebar-meta" id="logDirPath">-</p>
+        <div id="serverFiles" class="server-files"></div>
+      </aside>
+
+      <main class="main-panel">
+        <div id="tabs" class="tabs"></div>
+
+        <div id="compareControls" class="compare-controls" hidden>
+          <label>
+            Left Pane
+            <select id="leftSelect"></select>
+          </label>
+          <label>
+            Right Pane
+            <select id="rightSelect"></select>
+          </label>
+          <label class="toggle-label" for="compareSyncToggle">
+            <input id="compareSyncToggle" type="checkbox" />
+            Sync pane scroll
+          </label>
+        </div>
+
+        <div id="content" class="content"></div>
+      </main>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+</html>

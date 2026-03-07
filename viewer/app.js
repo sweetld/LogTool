@@ -27,6 +27,7 @@ const state = {
 
 const PATH_REGEX =
   /(?:\.{1,2}\/)?(?:[A-Za-z0-9._-]+\/)+[A-Za-z0-9._-]+\.[A-Za-z0-9_-]+|(?:\/[A-Za-z0-9._-]+)+\.[A-Za-z0-9_-]+/g;
+const SUPPORTED_LOG_EXTENSIONS = [".jsonl", ".ndjson"];
 
 const dom = {
   logDirPath: document.getElementById("logDirPath"),
@@ -58,7 +59,9 @@ window.addEventListener("DOMContentLoaded", () => {
 
 function bindEvents() {
   dom.refreshButton.addEventListener("click", async () => {
-    await refreshServerFiles();
+      await withButtonProgress(dom.refreshButton, async () => {
+          await refreshServerFiles();
+      });
   });
 
   if (dom.chooseDirButton && dom.directoryInput) {
@@ -352,12 +355,15 @@ function applyLocalDirectorySelection(
 
 function isEligibleLogFilePath(relativePath) {
   const normalized = normalizeLogRelativePath(relativePath).toLowerCase();
-  if (!normalized.endsWith(".jsonl")) {
+    const hasSupportedExtension = SUPPORTED_LOG_EXTENSIONS.some((ext) =>
+        normalized.endsWith(ext),
+    );
+    if (!hasSupportedExtension) {
     return false;
   }
 
   const fileName = normalized.split("/").pop() || "";
-  const fileStem = fileName.slice(0, -".jsonl".length);
+    const fileStem = fileName.replace(/\.(jsonl|ndjson)$/i, "");
   if (fileStem.endsWith("_raw")) {
     return false;
   }
@@ -431,8 +437,8 @@ function renderServerFiles() {
     empty.className = "empty";
     empty.textContent =
       state.fileListMode === "local"
-        ? "No JSONL files found in selected local directory."
-        : "No JSONL files found in log directory.";
+          ? "No JSONL/NDJSON files found in selected local directory."
+          : "No JSONL/NDJSON files found in log directory.";
     dom.serverFiles.appendChild(empty);
     return;
   }
@@ -1296,7 +1302,7 @@ function renderContent() {
 
   if (state.sessionOrder.length === 0) {
     showMessage(
-      "No sessions loaded yet. Load files from the left panel or upload JSONL files.",
+        "No sessions loaded yet. Load files from the left panel or upload JSONL/NDJSON files.",
     );
     return;
   }
@@ -1464,10 +1470,21 @@ function renderSessionMeta(session, paneName) {
   const container = document.createElement("div");
   container.className = "session-meta";
 
+    const headerRow = document.createElement("div");
+    headerRow.className = "session-meta-header";
+
   const header = document.createElement("div");
+    header.className = "session-meta-title";
   header.textContent = paneName
     ? `${paneName} Pane: ${session.name}`
     : session.name;
+
+    const copyTurnTextButton = makeCopyIconButton(
+        () => copyToClipboard(buildSessionTurnCopyText(session)),
+        "Copy turn text",
+    );
+
+    headerRow.append(header, copyTurnTextButton);
 
   const grid = document.createElement("div");
   grid.className = "session-meta-grid";
@@ -1486,7 +1503,7 @@ function renderSessionMeta(session, paneName) {
   addMetaItem(grid, "Model Lanes", session.meta.modelLanes.join(", ") || "-");
   addMetaItem(grid, "Task IDs", session.meta.taskIds.join(", ") || "-");
 
-  container.append(header, grid);
+    container.append(headerRow, grid);
 
   if (session.meta.latestSummary) {
     const summary = document.createElement("details");
@@ -1732,17 +1749,7 @@ function renderTurnBody(session, turn, root, query) {
 }
 
 function renderAssistantResponses(turn, root, query) {
-  const assistantEvents = turn.events.filter(
-    (event) => event.kind === "assistant_message",
-  );
-  const assistantEntries = assistantEvents
-    .map((event) => {
-      const text =
-        event.assistantText ||
-        "(No assistant text payload captured for this event.)";
-      return { event, text };
-    })
-    .filter((entry) => !startsWithToolUseEntry(entry.text));
+    const assistantEntries = getTurnAssistantResponseEntries(turn);
 
   if (assistantEntries.length === 0) {
     return;
@@ -1820,6 +1827,20 @@ function startsWithToolUseEntry(text) {
   return firstContentLine
     ? firstContentLine.toLowerCase().startsWith("tool_use")
     : false;
+}
+
+function getTurnAssistantResponseEntries(turn) {
+    const assistantEvents = Array.isArray(turn?.events)
+        ? turn.events.filter((event) => event.kind === "assistant_message")
+        : [];
+    return assistantEvents
+        .map((event) => ({
+            event,
+            text:
+                event.assistantText ||
+                "(No assistant text payload captured for this event.)",
+        }))
+        .filter((entry) => !startsWithToolUseEntry(entry.text));
 }
 
 function renderTurnViewToggle(turnKey, mode) {
@@ -1999,9 +2020,19 @@ function renderSelectedFileTab(file) {
   const wrap = document.createElement("div");
   wrap.className = "file-change-body";
 
+    const headerRow = document.createElement("div");
+    headerRow.className = "file-change-header";
+
   const header = document.createElement("div");
   header.className = "file-change-title";
   header.textContent = file.filePath;
+
+    const copyPathButton = makeCopyIconButton(
+        () => copyToClipboard(file.filePath),
+        "Copy file path",
+    );
+
+    headerRow.append(header, copyPathButton);
 
   const meta = document.createElement("div");
   meta.className = "event-meta";
@@ -2010,9 +2041,6 @@ function renderSelectedFileTab(file) {
   const actions = document.createElement("div");
   actions.className = "actions";
   actions.append(
-    makeButton("Copy File Path", () => copyToClipboard(file.filePath), {
-      feedbackLabel: "Copied",
-    }),
     makeButton(
       "Copy All Changed Code",
       () => copyToClipboard(joinFileChangeCode(file)),
@@ -2020,7 +2048,7 @@ function renderSelectedFileTab(file) {
     ),
   );
 
-  wrap.append(header, meta, actions);
+    wrap.append(headerRow, meta, actions);
 
   file.operations.forEach((operation, index) => {
     const opWrap = document.createElement("div");
@@ -2162,6 +2190,58 @@ function joinFileChangeCode(file) {
     }
   }
   return chunks.join("\n\n");
+}
+
+function buildSessionTurnCopyText(session) {
+    const turns = Array.isArray(session?.turns)
+        ? session.turns.filter((turn) => turn.prompt != null)
+        : [];
+    if (turns.length === 0) {
+        return "";
+    }
+
+    const lines = [];
+    for (const turn of turns) {
+        lines.push(`Turn ${turn.index}:`);
+        lines.push("  Prompt:");
+        lines.push(indentMultiline(turn.prompt?.text || "", 4));
+
+        lines.push("  Files changed:");
+        if (!Array.isArray(turn.changedFiles) || turn.changedFiles.length === 0) {
+            lines.push("    (none)");
+        } else {
+            for (const file of turn.changedFiles) {
+                lines.push(`    ${file.filePath}`);
+                lines.push(indentMultiline(joinFileChangeCode(file), 4));
+            }
+        }
+
+        lines.push("  Assistant responses:");
+        const assistantEntries = getTurnAssistantResponseEntries(turn);
+        if (assistantEntries.length === 0) {
+            lines.push("    (none)");
+        } else {
+            for (const entry of assistantEntries) {
+                lines.push(indentMultiline(entry.text, 4));
+            }
+        }
+
+        lines.push("");
+    }
+
+    return lines.join("\n").trim();
+}
+
+function indentMultiline(text, spaces) {
+    const pad = " ".repeat(Math.max(0, Number(spaces) || 0));
+    const source = String(text ?? "");
+    if (!source) {
+        return `${pad}(empty)`;
+    }
+    return source
+        .split(/\r?\n/)
+        .map((line) => `${pad}${line}`)
+        .join("\n");
 }
 
 function shortenPath(filePath) {
@@ -2459,6 +2539,30 @@ function makeButton(label, onClick, options = {}) {
     if (feedbackLabel && result !== false) {
       flashButton(button, feedbackLabel, feedbackMs);
     }
+  });
+    return button;
+}
+
+function makeCopyIconButton(onClick, label = "Copy") {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "icon-button";
+    button.title = label;
+    button.setAttribute("aria-label", label);
+    button.innerHTML =
+        '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16 1H5a2 2 0 0 0-2 2v13h2V3h11V1zm3 4H9a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2zm0 16H9V7h10v14z"/></svg>';
+    button.addEventListener("click", async () => {
+        const result = await onClick(button);
+        if (result === false) {
+            return;
+        }
+        button.classList.add("icon-button-copied");
+        const originalTitle = label;
+        button.title = "Copied";
+        window.setTimeout(() => {
+            button.classList.remove("icon-button-copied");
+            button.title = originalTitle;
+        }, 900);
   });
   return button;
 }

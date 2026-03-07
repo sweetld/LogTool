@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Local UI for browsing Claude/Codex session JSONL logs."""
+"""Local UI for browsing Claude/Codex session JSONL/NDJSON logs."""
 
 from __future__ import annotations
 
@@ -12,11 +12,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-
 ROOT_DIR = Path(__file__).resolve().parent
 DEFAULT_LOG_DIR = ROOT_DIR / "log"
 DEFAULT_UI_DIR = ROOT_DIR / "viewer"
 STATE_FILE = ROOT_DIR / ".session_viewer_state.json"
+SUPPORTED_LOG_SUFFIXES = {".jsonl", ".ndjson"}
 
 
 def read_persisted_log_dir(state_file: Path) -> Path | None:
@@ -79,7 +79,9 @@ class SessionViewerHandler(BaseHTTPRequestHandler):
         log_dir = type(self).log_dir
         files = []
         if log_dir.exists():
-            for path in sorted(log_dir.glob("*.jsonl")):
+            for path in sorted(log_dir.iterdir()):
+                if not path.is_file() or path.suffix.lower() not in SUPPORTED_LOG_SUFFIXES:
+                    continue
                 stat = path.stat()
                 files.append(
                     {
@@ -112,8 +114,8 @@ class SessionViewerHandler(BaseHTTPRequestHandler):
             self._send_json({"error": "Invalid file path"}, 400)
             return
 
-        if requested.suffix.lower() != ".jsonl":
-            self._send_json({"error": "Only .jsonl files are supported"}, 400)
+        if requested.suffix.lower() not in SUPPORTED_LOG_SUFFIXES:
+            self._send_json({"error": "Only .jsonl and .ndjson files are supported"}, 400)
             return
 
         if not requested.exists() or not requested.is_file():
@@ -225,14 +227,14 @@ class SessionViewerHandler(BaseHTTPRequestHandler):
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Run a local UI for inspecting session JSONL logs."
+        description="Run a local UI for inspecting session JSONL/NDJSON logs."
     )
     parser.add_argument("--host", default="127.0.0.1", help="Bind host (default: 127.0.0.1)")
     parser.add_argument("--port", default=8787, type=int, help="Bind port (default: 8787)")
     parser.add_argument(
         "--log-dir",
         default=str(DEFAULT_LOG_DIR),
-        help=f"Directory containing JSONL session files (default: {DEFAULT_LOG_DIR})",
+        help=f"Directory containing JSONL/NDJSON session files (default: {DEFAULT_LOG_DIR})",
     )
     parser.add_argument(
         "--ui-dir",

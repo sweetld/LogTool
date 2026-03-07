@@ -339,6 +339,18 @@ button:hover {
   gap: 8px;
 }
 
+.session-meta-header {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+}
+
+.session-meta-title {
+    flex: 1;
+    font-weight: 600;
+    overflow-wrap: anywhere;
+}
+
 .session-meta-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(120px, 1fr));
@@ -466,9 +478,37 @@ button:hover {
   gap: 8px;
 }
 
+.file-change-header {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+}
+
 .file-change-title {
+    flex: 1;
   font-weight: 600;
   font-size: 13px;
+    overflow-wrap: anywhere;
+}
+
+.icon-button {
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.icon-button svg {
+    width: 16px;
+    height: 16px;
+    fill: currentColor;
+}
+
+.icon-button-copied {
+    background: #d8ecfb;
+    border-color: #8bbce1;
 }
 
 .code-compare {

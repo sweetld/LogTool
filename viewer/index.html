@@ -17,8 +17,15 @@
       </div>
       <div class="controls-row">
         <button id="refreshButton" type="button">Refresh Log Directory</button>
-        <label class="file-label" for="uploadInput">Load JSONL File(s)</label>
-        <input id="uploadInput" type="file" accept=".jsonl,.txt" multiple />
+          <label class="file-label" for="uploadInput"
+          >Load JSONL/NDJSON File(s)</label
+          >
+          <input
+                  id="uploadInput"
+                  type="file"
+                  accept=".jsonl,.ndjson,.txt"
+                  multiple
+          />
         <input
           id="searchInput"
           type="search"

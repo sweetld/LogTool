@@ -2193,18 +2193,26 @@ function joinFileChangeCode(file) {
 }
 
 function buildSessionTurnCopyText(session) {
-    const turns = Array.isArray(session?.turns)
-        ? session.turns.filter((turn) => turn.prompt != null)
-        : [];
+  const turns = Array.isArray(session?.turns)
+    ? session.turns.filter((turn) => turn.prompt != null)
+    : [];
     if (turns.length === 0) {
         return "";
     }
 
-    const lines = [];
-    for (const turn of turns) {
-        lines.push(`Turn ${turn.index}:`);
-        lines.push("  Prompt:");
-        lines.push(indentMultiline(turn.prompt?.text || "", 4));
+  const lines = [];
+  for (const turn of turns) {
+    const assistantEntries = getTurnAssistantResponseEntries(turn);
+    const hasRealAssistantResponse = assistantEntries.some(
+      (entry) => !isNoResponseRequestedText(entry.text),
+    );
+    if (!hasRealAssistantResponse) {
+      continue;
+    }
+
+    lines.push(`Turn ${turn.index}:`);
+    lines.push("  Prompt:");
+    lines.push(indentMultiline(turn.prompt?.text || "", 4));
 
         lines.push("  Files changed:");
         if (!Array.isArray(turn.changedFiles) || turn.changedFiles.length === 0) {
@@ -2216,20 +2224,30 @@ function buildSessionTurnCopyText(session) {
             }
         }
 
-        lines.push("  Assistant responses:");
-        const assistantEntries = getTurnAssistantResponseEntries(turn);
-        if (assistantEntries.length === 0) {
-            lines.push("    (none)");
-        } else {
-            for (const entry of assistantEntries) {
-                lines.push(indentMultiline(entry.text, 4));
-            }
+    lines.push("  Assistant responses:");
+    if (assistantEntries.length === 0) {
+      lines.push("    (none)");
+    } else {
+      for (const entry of assistantEntries) {
+        lines.push(indentMultiline(entry.text, 4));
+      }
         }
 
         lines.push("");
     }
 
-    return lines.join("\n").trim();
+  return lines.join("\n").trim();
+}
+
+function isNoResponseRequestedText(text) {
+  const normalized = String(text ?? "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+  return (
+    normalized === "no response requested" ||
+    normalized === "no response requested."
+  );
 }
 
 function indentMultiline(text, spaces) {

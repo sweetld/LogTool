@@ -21,6 +21,8 @@ const state = {
   syncDiffScroll: false,
   activeFileTabByTurn: {},
   turnOpenByKey: {},
+  turnChangesOpenByKey: {},
+  turnViewModeByKey: {},
 };
 
 const PATH_REGEX =
@@ -76,19 +78,19 @@ function bindEvents() {
         );
       }
     });
-    dom.directoryInput.addEventListener("change", async event => {
+    dom.directoryInput.addEventListener("change", async (event) => {
       const input = event.currentTarget;
       if (!(input instanceof HTMLInputElement) || !input.files) {
         return;
       }
       try {
         const selectedFiles = [...input.files];
-        const entries = selectedFiles.map(file => ({
+        const entries = selectedFiles.map((file) => ({
           file,
           relativePath: String(file.webkitRelativePath || file.name),
         }));
         const top = entries
-          .map(entry => entry.relativePath.split("/")[0])
+          .map((entry) => entry.relativePath.split("/")[0])
           .filter(Boolean)[0];
         state.currentDirectoryHandle = null;
         await loadSelectedLocalDirectory(entries, top || "Selected directory");
@@ -102,7 +104,7 @@ function bindEvents() {
     });
   }
 
-  dom.uploadInput.addEventListener("change", async event => {
+  dom.uploadInput.addEventListener("change", async (event) => {
     const input = event.currentTarget;
     if (!(input instanceof HTMLInputElement) || !input.files) {
       return;
@@ -126,7 +128,7 @@ function bindEvents() {
     }
   });
 
-  dom.searchInput.addEventListener("input", event => {
+  dom.searchInput.addEventListener("input", (event) => {
     const input = event.currentTarget;
     if (!(input instanceof HTMLInputElement)) {
       return;
@@ -150,7 +152,7 @@ function bindEvents() {
   }
 
   if (dom.lineNumbersToggle) {
-    dom.lineNumbersToggle.addEventListener("change", event => {
+    dom.lineNumbersToggle.addEventListener("change", (event) => {
       const input = event.currentTarget;
       if (!(input instanceof HTMLInputElement)) {
         return;
@@ -161,7 +163,7 @@ function bindEvents() {
   }
 
   if (dom.syncDiffToggle) {
-    dom.syncDiffToggle.addEventListener("change", event => {
+    dom.syncDiffToggle.addEventListener("change", (event) => {
       const input = event.currentTarget;
       if (!(input instanceof HTMLInputElement)) {
         return;
@@ -181,7 +183,7 @@ function bindEvents() {
     renderAll();
   });
 
-  dom.leftSelect.addEventListener("change", event => {
+  dom.leftSelect.addEventListener("change", (event) => {
     const select = event.currentTarget;
     if (!(select instanceof HTMLSelectElement)) {
       return;
@@ -190,7 +192,7 @@ function bindEvents() {
     renderContent();
   });
 
-  dom.rightSelect.addEventListener("change", event => {
+  dom.rightSelect.addEventListener("change", (event) => {
     const select = event.currentTarget;
     if (!(select instanceof HTMLSelectElement)) {
       return;
@@ -200,7 +202,7 @@ function bindEvents() {
   });
 
   if (dom.compareSyncToggle) {
-    dom.compareSyncToggle.addEventListener("change", event => {
+    dom.compareSyncToggle.addEventListener("change", (event) => {
       const input = event.currentTarget;
       if (!(input instanceof HTMLInputElement)) {
         return;
@@ -215,7 +217,9 @@ async function initialize() {
   await refreshServerFiles();
 
   for (const file of state.serverFiles) {
-    await loadServerFile(file.name, { activate: state.activeSessionId == null });
+    await loadServerFile(file.name, {
+      activate: state.activeSessionId == null,
+    });
   }
 
   renderAll();
@@ -261,7 +265,10 @@ async function pickDirectoryWithNativePicker() {
   state.currentDirectoryHandle = handle;
 
   const entries = await collectFilesFromDirectoryHandle(handle);
-  await loadSelectedLocalDirectory(entries, handle.name || "Selected directory");
+  await loadSelectedLocalDirectory(
+    entries,
+    handle.name || "Selected directory",
+  );
   return true;
 }
 
@@ -278,7 +285,10 @@ async function collectFilesFromDirectoryHandle(directoryHandle) {
     if (!modelHandle) {
       continue;
     }
-    const nested = await collectFilesRecursively(modelHandle, `logs/${modelName}`);
+    const nested = await collectFilesRecursively(
+      modelHandle,
+      `logs/${modelName}`,
+    );
     out.push(...nested);
   }
 
@@ -314,12 +324,17 @@ async function collectFilesRecursively(directoryHandle, basePath) {
   return out;
 }
 
-function applyLocalDirectorySelection(fileEntries, directoryLabel = "Selected directory") {
+function applyLocalDirectorySelection(
+  fileEntries,
+  directoryLabel = "Selected directory",
+) {
   const localFiles = fileEntries
-    .filter(entry => isEligibleLogFilePath(entry.relativePath))
-    .map(entry => {
+    .filter((entry) => isEligibleLogFilePath(entry.relativePath))
+    .map((entry) => {
       const file = entry.file;
-      const relativePath = normalizeLogRelativePath(entry.relativePath || file.name);
+      const relativePath = normalizeLogRelativePath(
+        entry.relativePath || file.name,
+      );
       return {
         source: "local",
         name: relativePath,
@@ -351,7 +366,10 @@ function isEligibleLogFilePath(relativePath) {
     return false;
   }
 
-  return normalized.startsWith("logs/model_a/") || normalized.startsWith("logs/model_b/");
+  return (
+    normalized.startsWith("logs/model_a/") ||
+    normalized.startsWith("logs/model_b/")
+  );
 }
 
 function normalizeLogRelativePath(relativePath) {
@@ -369,7 +387,10 @@ function normalizeLogRelativePath(relativePath) {
   return parts.join("/");
 }
 
-async function loadSelectedLocalDirectory(fileEntries, directoryLabel = "Selected directory") {
+async function loadSelectedLocalDirectory(
+  fileEntries,
+  directoryLabel = "Selected directory",
+) {
   applyLocalDirectorySelection(fileEntries, directoryLabel);
   resetLoadedSessions();
 
@@ -389,13 +410,15 @@ function resetLoadedSessions() {
   state.rightSessionId = null;
   state.activeFileTabByTurn = {};
   state.turnOpenByKey = {};
+  state.turnChangesOpenByKey = {};
+  state.turnViewModeByKey = {};
 }
 
 function getDisplayedFiles() {
   if (state.fileListMode === "local") {
     return state.localFiles;
   }
-  return state.serverFiles.map(file => ({ ...file, source: "server" }));
+  return state.serverFiles.map((file) => ({ ...file, source: "server" }));
 }
 
 function renderServerFiles() {
@@ -431,7 +454,9 @@ function renderServerFiles() {
 
     const loadButton = document.createElement("button");
     const sessionId =
-      file.source === "local" ? localSessionId(file.name, file.file?.lastModified || 0) : serverSessionId(file.name);
+      file.source === "local"
+        ? localSessionId(file.name, file.file?.lastModified || 0)
+        : serverSessionId(file.name);
     const loaded = state.sessions.has(sessionId);
     loadButton.textContent = loaded ? "Reload" : "Load";
     loadButton.addEventListener("click", async () => {
@@ -462,7 +487,9 @@ function renderServerFiles() {
 async function loadLocalFile(entry, options = { activate: false }) {
   const sourceFile = entry?.file;
   if (!(sourceFile instanceof File)) {
-    throw new Error("Selected local file is no longer available. Choose the directory again.");
+    throw new Error(
+      "Selected local file is no longer available. Choose the directory again.",
+    );
   }
 
   const content = await sourceFile.text();
@@ -500,7 +527,8 @@ function upsertSession(session, options = { activate: false }) {
   }
 
   if (state.rightSessionId == null && state.sessionOrder.length > 1) {
-    const other = state.sessionOrder.find(id => id !== state.leftSessionId) || null;
+    const other =
+      state.sessionOrder.find((id) => id !== state.leftSessionId) || null;
     state.rightSessionId = other;
   }
 }
@@ -576,8 +604,8 @@ function normalizeEvent(raw, lineNumber) {
 
     const toolResults = Array.isArray(content)
       ? content
-          .filter(item => item && typeof item === "object")
-          .map(item => ({
+          .filter((item) => item && typeof item === "object")
+          .map((item) => ({
             type: item.type || "tool_result",
             toolUseId: item.tool_use_id || null,
             content: item.content,
@@ -590,7 +618,7 @@ function normalizeEvent(raw, lineNumber) {
       ? truncate(
           oneLine(
             toolResults
-              .map(result => {
+              .map((result) => {
                 const text = flattenValue(result.content);
                 return text;
               })
@@ -611,14 +639,16 @@ function normalizeEvent(raw, lineNumber) {
   }
 
   if (raw.type === "assistant") {
-    const blocks = Array.isArray(raw?.message?.content) ? raw.message.content : [];
-    const textBlocks = blocks.filter(block => block?.type === "text");
-    const toolUses = blocks.filter(block => block?.type === "tool_use");
+    const content = raw?.message?.content;
+    const blocks = Array.isArray(content) ? content : [];
+    const textBlocks = blocks.filter((block) => block?.type === "text");
+    const toolUses = blocks.filter((block) => block?.type === "tool_use");
+    const assistantText = extractAssistantText(raw, textBlocks);
 
-    const preview = textBlocks.length
-      ? truncate(oneLine(textBlocks.map(block => block.text || "").join("\n")), 180)
+    const preview = assistantText
+      ? truncate(oneLine(assistantText), 180)
       : toolUses.length
-        ? `Tool calls: ${toolUses.map(tool => tool.name).join(", ")}`
+        ? `Tool calls: ${toolUses.map((tool) => tool.name).join(", ")}`
         : "Assistant event";
 
     return {
@@ -629,6 +659,7 @@ function normalizeEvent(raw, lineNumber) {
       blocks,
       textBlocks,
       toolUses,
+      assistantText,
       messageId: raw?.message?.id || null,
       searchBlob: collectSearchBlob(raw),
     };
@@ -708,7 +739,9 @@ function classifyPromptClass(raw, text) {
   }
 
   if (
-    normalized.includes("this session is being continued from a previous conversation") &&
+    normalized.includes(
+      "this session is being continued from a previous conversation",
+    ) &&
     normalized.includes("ran out of context")
   ) {
     return "continuation";
@@ -723,13 +756,19 @@ function classifyPromptClass(raw, text) {
   }
 
   if (
-    normalized.includes("if you need specific details from before exiting plan mode") ||
+    normalized.includes(
+      "if you need specific details from before exiting plan mode",
+    ) ||
     normalized.includes("if you need specific details from before compaction")
   ) {
     return "meta";
   }
 
-  if (normalized.includes("please continue the conversation from where we left off")) {
+  if (
+    normalized.includes(
+      "please continue the conversation from where we left off",
+    )
+  ) {
     return "meta";
   }
 
@@ -782,10 +821,14 @@ function buildTurns(events) {
   for (const event of events) {
     if (event.kind === "user_prompt") {
       if (event.promptClass === "hidden") {
+        detachedPrompts.push({ event, reason: "hidden" });
         continue;
       }
 
-      if (event.promptClass === "continuation" || isCompactedContextPrompt(event.text || "")) {
+      if (
+        event.promptClass === "continuation" ||
+        isCompactedContextPrompt(event.text || "")
+      ) {
         if (currentTurn) {
           currentTurn.continuationPrompts.push(event);
           continue;
@@ -845,6 +888,10 @@ function buildTurns(events) {
   if (preamble.events.length > 0) {
     finalizeTurn(preamble);
     finalized.push(preamble);
+    flowItems.unshift({
+      type: "turn",
+      turn: preamble,
+    });
   }
 
   for (const turn of turns) {
@@ -866,8 +913,9 @@ function isCompactedContextPrompt(text) {
     return false;
   }
   return (
-    normalized.includes("this session is being continued from a previous conversation") &&
-    normalized.includes("ran out of context")
+    normalized.includes(
+      "this session is being continued from a previous conversation",
+    ) && normalized.includes("ran out of context")
   );
 }
 
@@ -900,7 +948,10 @@ function finalizeTurn(turn) {
     if (event.kind === "assistant_message") {
       stats.assistantMessages += 1;
       stats.toolUses += event.toolUses.length;
-      candidateText.push(event.textBlocks.map(block => block.text || "").join("\n"));
+      candidateText.push(
+        event.assistantText ||
+          event.textBlocks.map((block) => block.text || "").join("\n"),
+      );
     } else if (event.kind === "assistant_thinking") {
       stats.assistantThinking += 1;
       candidateText.push(event.thinking || "");
@@ -908,7 +959,7 @@ function finalizeTurn(turn) {
       stats.toolResults += event.toolResults.length;
       candidateText.push(
         event.toolResults
-          .map(result => {
+          .map((result) => {
             const name = result.toolName || "";
             return `${name}\n${flattenValue(result.content)}`;
           })
@@ -1003,7 +1054,9 @@ function extractTurnChanges(events) {
     }
   }
 
-  const files = [...filesMap.values()].sort((a, b) => a.filePath.localeCompare(b.filePath));
+  const files = [...filesMap.values()].sort((a, b) =>
+    a.filePath.localeCompare(b.filePath),
+  );
   return {
     files,
     stats: {
@@ -1043,7 +1096,7 @@ function getOperationStatus(results) {
   if (!results || results.length === 0) {
     return "unknown";
   }
-  return results.some(result => result.isError) ? "error" : "ok";
+  return results.some((result) => result.isError) ? "error" : "ok";
 }
 
 function summarizeToolResults(results) {
@@ -1060,10 +1113,10 @@ function summarizeToolResults(results) {
 
 function buildSessionMeta(name, events, turns) {
   const timestamps = events
-    .map(event => event.timestamp)
+    .map((event) => event.timestamp)
     .filter(Boolean)
-    .map(value => Date.parse(value))
-    .filter(value => Number.isFinite(value));
+    .map((value) => Date.parse(value))
+    .filter((value) => Number.isFinite(value));
 
   const modelNames = new Set();
   const lanes = new Set();
@@ -1086,17 +1139,21 @@ function buildSessionMeta(name, events, turns) {
     }
   }
 
-  const promptCount = turns.filter(turn => turn.prompt != null).length;
+  const promptCount = turns.filter((turn) => turn.prompt != null).length;
   const latestSummary = [...events]
     .reverse()
-    .find(event => event.type === "session_summary")?.raw?.summary_data;
+    .find((event) => event.type === "session_summary")?.raw?.summary_data;
 
   return {
     name,
     eventCount: events.length,
     promptCount,
-    firstTimestamp: timestamps.length ? new Date(Math.min(...timestamps)).toISOString() : null,
-    lastTimestamp: timestamps.length ? new Date(Math.max(...timestamps)).toISOString() : null,
+    firstTimestamp: timestamps.length
+      ? new Date(Math.min(...timestamps)).toISOString()
+      : null,
+    lastTimestamp: timestamps.length
+      ? new Date(Math.max(...timestamps)).toISOString()
+      : null,
     modelNames: [...modelNames],
     modelLanes: [...lanes],
     taskIds: [...taskIds],
@@ -1167,7 +1224,7 @@ function renderTabs() {
     close.type = "button";
     close.textContent = "x";
     close.title = "Remove from view";
-    close.addEventListener("click", event => {
+    close.addEventListener("click", (event) => {
       event.stopPropagation();
       removeSession(sessionId);
     });
@@ -1179,7 +1236,9 @@ function renderTabs() {
 
 function renderCompareControls() {
   dom.compareButton.classList.toggle("active", state.compareMode);
-  dom.compareButton.textContent = state.compareMode ? "Disable Compare" : "Enable Compare";
+  dom.compareButton.textContent = state.compareMode
+    ? "Disable Compare"
+    : "Enable Compare";
   dom.compareControls.hidden = !state.compareMode;
   dom.compareControls.style.display = state.compareMode ? "flex" : "none";
 
@@ -1195,21 +1254,35 @@ function renderCompareControls() {
   normalizeCompareSelection();
 
   const options = state.sessionOrder
-    .map(id => state.sessions.get(id))
+    .map((id) => state.sessions.get(id))
     .filter(Boolean)
-    .map(session => ({ id: session.id, name: session.name }));
+    .map((session) => ({ id: session.id, name: session.name }));
 
   dom.leftSelect.innerHTML = "";
   dom.rightSelect.innerHTML = "";
-  dom.leftSelect.appendChild(new Option("Select left session...", "", false, !state.leftSessionId));
+  dom.leftSelect.appendChild(
+    new Option("Select left session...", "", false, !state.leftSessionId),
+  );
   dom.rightSelect.appendChild(
     new Option("Select right session...", "", false, !state.rightSessionId),
   );
 
   for (const option of options) {
-    dom.leftSelect.appendChild(new Option(option.name, option.id, false, option.id === state.leftSessionId));
+    dom.leftSelect.appendChild(
+      new Option(
+        option.name,
+        option.id,
+        false,
+        option.id === state.leftSessionId,
+      ),
+    );
     dom.rightSelect.appendChild(
-      new Option(option.name, option.id, false, option.id === state.rightSessionId),
+      new Option(
+        option.name,
+        option.id,
+        false,
+        option.id === state.rightSessionId,
+      ),
     );
   }
 
@@ -1222,12 +1295,16 @@ function renderContent() {
   dom.content.innerHTML = "";
 
   if (state.sessionOrder.length === 0) {
-    showMessage("No sessions loaded yet. Load files from the left panel or upload JSONL files.");
+    showMessage(
+      "No sessions loaded yet. Load files from the left panel or upload JSONL files.",
+    );
     return;
   }
 
   if (!state.compareMode) {
-    const session = state.sessions.get(state.activeSessionId || state.sessionOrder[0]);
+    const session = state.sessions.get(
+      state.activeSessionId || state.sessionOrder[0],
+    );
     if (!session) {
       showMessage("Select a session tab to begin.");
       return;
@@ -1292,7 +1369,11 @@ function renderSessionIntoPane(session, pane, query, paneName = null) {
     title.textContent = `Parse warnings (${session.parseErrors.length})`;
 
     const preview = document.createElement("pre");
-    preview.textContent = JSON.stringify(session.parseErrors.slice(0, 5), null, 2);
+    preview.textContent = JSON.stringify(
+      session.parseErrors.slice(0, 5),
+      null,
+      2,
+    );
 
     errorCard.append(title, preview);
     pane.appendChild(errorCard);
@@ -1303,8 +1384,8 @@ function renderSessionIntoPane(session, pane, query, paneName = null) {
   const sourceItems = Array.isArray(session.flowItems)
     ? session.flowItems
     : session.turns
-        .filter(turn => turn.prompt != null)
-        .map(turn => ({ type: "turn", turn }));
+        .filter((turn) => turn.prompt != null)
+        .map((turn) => ({ type: "turn", turn }));
   const items = [...sourceItems];
 
   const list = document.createElement("div");
@@ -1316,7 +1397,7 @@ function renderSessionIntoPane(session, pane, query, paneName = null) {
     return;
   }
 
-  items.forEach(item => {
+  items.forEach((item) => {
     if (item.type === "info") {
       list.appendChild(renderInfoItemCard(item.info, query));
       return;
@@ -1384,7 +1465,9 @@ function renderSessionMeta(session, paneName) {
   container.className = "session-meta";
 
   const header = document.createElement("div");
-  header.textContent = paneName ? `${paneName} Pane: ${session.name}` : session.name;
+  header.textContent = paneName
+    ? `${paneName} Pane: ${session.name}`
+    : session.name;
 
   const grid = document.createElement("div");
   grid.className = "session-meta-grid";
@@ -1392,7 +1475,11 @@ function renderSessionMeta(session, paneName) {
   addMetaItem(grid, "Source", session.source);
   addMetaItem(grid, "Events", String(session.meta.eventCount));
   addMetaItem(grid, "Human Prompts", String(session.meta.promptCount));
-  addMetaItem(grid, "Errors/System", String(session.detachedPrompts?.length || 0));
+  addMetaItem(
+    grid,
+    "Errors/System",
+    String(session.detachedPrompts?.length || 0),
+  );
   addMetaItem(grid, "Start", formatTimestamp(session.meta.firstTimestamp));
   addMetaItem(grid, "End", formatTimestamp(session.meta.lastTimestamp));
   addMetaItem(grid, "Models", session.meta.modelNames.join(", ") || "-");
@@ -1423,7 +1510,8 @@ function renderSessionMeta(session, paneName) {
 function renderInfoItemCard(info, query) {
   const details = document.createElement("details");
   details.className = "info-item";
-  details.open = Boolean(query) && (info.event?.searchBlob || "").includes(query);
+  details.open =
+    Boolean(query) && (info.event?.searchBlob || "").includes(query);
 
   const summary = document.createElement("summary");
   const title = document.createElement("div");
@@ -1450,9 +1538,13 @@ function renderInfoItemCard(info, query) {
     makeButton("Copy Info Text", () => copyToClipboard(info.event.text || ""), {
       feedbackLabel: "Copied",
     }),
-    makeButton("Copy Info JSON", () => copyToClipboard(JSON.stringify(info.event.raw, null, 2)), {
-      feedbackLabel: "Copied",
-    }),
+    makeButton(
+      "Copy Info JSON",
+      () => copyToClipboard(JSON.stringify(info.event.raw, null, 2)),
+      {
+        feedbackLabel: "Copied",
+      },
+    ),
   );
 
   const pre = document.createElement("pre");
@@ -1472,7 +1564,9 @@ function extractXmlTagValue(text, tagName) {
 }
 
 function renderDetachedPromptSection(session, pane, query) {
-  const all = Array.isArray(session.detachedPrompts) ? session.detachedPrompts : [];
+  const all = Array.isArray(session.detachedPrompts)
+    ? session.detachedPrompts
+    : [];
   if (all.length === 0) {
     return;
   }
@@ -1481,7 +1575,9 @@ function renderDetachedPromptSection(session, pane, query) {
 
   const section = document.createElement("details");
   section.className = "errors-section";
-  section.open = Boolean(query) && grouped.some(group => (group.searchBlob || "").includes(query));
+  section.open =
+    Boolean(query) &&
+    grouped.some((group) => (group.searchBlob || "").includes(query));
 
   const summary = document.createElement("summary");
   summary.textContent = `Errors / System Messages (${all.length} messages, ${grouped.length} groups)`;
@@ -1494,7 +1590,8 @@ function renderDetachedPromptSection(session, pane, query) {
     const event = group.firstEvent;
     const groupDetails = document.createElement("details");
     groupDetails.className = "error-group";
-    groupDetails.open = Boolean(query) && (group.searchBlob || "").includes(query);
+    groupDetails.open =
+      Boolean(query) && (group.searchBlob || "").includes(query);
 
     const groupSummary = document.createElement("summary");
     const groupTitle = document.createElement("div");
@@ -1560,7 +1657,10 @@ function groupDetachedPrompts(items) {
     }
     const group = groups.get(key);
     group.count += 1;
-    if (Date.parse(item.event.timestamp || "") > Date.parse(group.lastEvent.timestamp || "")) {
+    if (
+      Date.parse(item.event.timestamp || "") >
+      Date.parse(group.lastEvent.timestamp || "")
+    ) {
       group.lastEvent = item.event;
     }
   }
@@ -1574,6 +1674,15 @@ function groupDetachedPrompts(items) {
 
 function renderTurnBody(session, turn, root, query) {
   root.innerHTML = "";
+  const turnKey = `${session.id}:${turn.id}`;
+  const mode = state.turnViewModeByKey[turnKey] === "raw" ? "raw" : "pretty";
+
+  root.appendChild(renderTurnViewToggle(turnKey, mode));
+
+  if (mode === "raw") {
+    renderRawTurnContent(turn, root);
+    return;
+  }
 
   if (turn.prompt) {
     const prompt = document.createElement("div");
@@ -1593,13 +1702,21 @@ function renderTurnBody(session, turn, root, query) {
     const actions = document.createElement("div");
     actions.className = "actions";
 
-    const copyText = makeButton("Copy Prompt Text", () => {
-      copyToClipboard(turn.prompt.text || "");
-    }, { feedbackLabel: "Copied" });
+    const copyText = makeButton(
+      "Copy Prompt Text",
+      () => {
+        copyToClipboard(turn.prompt.text || "");
+      },
+      { feedbackLabel: "Copied" },
+    );
 
-    const copyJson = makeButton("Copy Prompt JSON", () => {
-      copyToClipboard(JSON.stringify(turn.prompt.raw, null, 2));
-    }, { feedbackLabel: "Copied" });
+    const copyJson = makeButton(
+      "Copy Prompt JSON",
+      () => {
+        copyToClipboard(JSON.stringify(turn.prompt.raw, null, 2));
+      },
+      { feedbackLabel: "Copied" },
+    );
 
     actions.append(copyText, copyJson);
 
@@ -1610,29 +1727,44 @@ function renderTurnBody(session, turn, root, query) {
     root.appendChild(prompt);
   }
 
-  renderCompactedContexts(turn, root, query);
-  renderTurnChanges(session, turn, root);
+  renderTurnChanges(session, turn, root, query);
+  renderAssistantResponses(turn, root, query);
 }
 
-function renderCompactedContexts(turn, root, query) {
-  if (!Array.isArray(turn.continuationPrompts) || turn.continuationPrompts.length === 0) {
+function renderAssistantResponses(turn, root, query) {
+  const assistantEvents = turn.events.filter(
+    (event) => event.kind === "assistant_message",
+  );
+  const assistantEntries = assistantEvents
+    .map((event) => {
+      const text =
+        event.assistantText ||
+        "(No assistant text payload captured for this event.)";
+      return { event, text };
+    })
+    .filter((entry) => !startsWithToolUseEntry(entry.text));
+
+  if (assistantEntries.length === 0) {
     return;
   }
 
   const details = document.createElement("details");
   details.className = "event";
-  details.open = false;
-  details.dataset.searchExclude = "1";
+  details.open =
+    Boolean(query) &&
+    assistantEntries.some((entry) =>
+      (entry.event.searchBlob || "").includes(query),
+    );
 
   const summary = document.createElement("summary");
   const title = document.createElement("div");
   title.className = "section-title";
-  title.textContent = `Compacted context (${turn.continuationPrompts.length})`;
+  title.textContent = `Assistant responses (${assistantEntries.length})`;
 
   const meta = document.createElement("div");
   meta.className = "event-meta";
   meta.textContent =
-    "Continuation prompts merged into this turn because they represent context compaction.";
+    "Assistant text captured from this turn. Search matches are highlighted here.";
 
   summary.append(title, meta);
   details.appendChild(summary);
@@ -1640,75 +1772,196 @@ function renderCompactedContexts(turn, root, query) {
   const body = document.createElement("div");
   body.className = "event-body";
 
-  turn.continuationPrompts.forEach((continuation, index) => {
-    const block = document.createElement("div");
-    block.className = "prompt";
+  assistantEntries.forEach((entry, index) => {
+    const { event, text } = entry;
+    const box = document.createElement("div");
+    box.className = "prompt";
 
     const badges = document.createElement("div");
     badges.className = "badges";
     badges.append(
-      makeBadge(`Compacted Context ${index + 1}`),
-      makeBadge(`Timestamp: ${formatTimestamp(continuation.timestamp)}`),
-      makeBadge(`Line: ${continuation.lineNumber}`),
+      makeBadge(`#${index + 1}`),
+      makeBadge("Assistant"),
+      makeBadge(`Timestamp: ${formatTimestamp(event.timestamp)}`),
+      makeBadge(`Line: ${event.lineNumber}`),
     );
 
     const actions = document.createElement("div");
     actions.className = "actions";
     actions.append(
-      makeButton("Copy Context Text", () => copyToClipboard(continuation.text || ""), {
+      makeButton("Copy Text", () => copyToClipboard(text), {
         feedbackLabel: "Copied",
       }),
       makeButton(
-        "Copy Context JSON",
-        () => copyToClipboard(JSON.stringify(continuation.raw, null, 2)),
-        { feedbackLabel: "Copied" },
+        "Copy JSON",
+        () => copyToClipboard(JSON.stringify(event.raw, null, 2)),
+        {
+          feedbackLabel: "Copied",
+        },
       ),
     );
 
     const pre = document.createElement("pre");
-    pre.textContent = continuation.text || "";
+    pre.textContent = text;
 
-    block.append(badges, actions, pre);
-    body.appendChild(block);
+    box.append(badges, actions, pre);
+    body.appendChild(box);
   });
 
   details.appendChild(body);
   root.appendChild(details);
 }
 
-function renderTurnChanges(session, turn, root) {
-  const section = document.createElement("div");
-  section.className = "changes-card";
+function startsWithToolUseEntry(text) {
+  const firstContentLine = String(text || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find(Boolean);
+  return firstContentLine
+    ? firstContentLine.toLowerCase().startsWith("tool_use")
+    : false;
+}
 
-  const head = document.createElement("div");
-  head.className = "changes-head";
+function renderTurnViewToggle(turnKey, mode) {
+  const tabs = document.createElement("div");
+  tabs.className = "file-tabs";
 
+  const prettyButton = document.createElement("button");
+  prettyButton.type = "button";
+  prettyButton.className = "file-tab";
+  prettyButton.textContent = "Pretty";
+  if (mode === "pretty") {
+    prettyButton.classList.add("active");
+  }
+  prettyButton.addEventListener("click", () => {
+    if (state.turnViewModeByKey[turnKey] === "pretty") {
+      return;
+    }
+    state.turnViewModeByKey[turnKey] = "pretty";
+    renderContent();
+  });
+
+  const rawButton = document.createElement("button");
+  rawButton.type = "button";
+  rawButton.className = "file-tab";
+  rawButton.textContent = "Raw";
+  if (mode === "raw") {
+    rawButton.classList.add("active");
+  }
+  rawButton.addEventListener("click", () => {
+    if (state.turnViewModeByKey[turnKey] === "raw") {
+      return;
+    }
+    state.turnViewModeByKey[turnKey] = "raw";
+    renderContent();
+  });
+
+  tabs.append(prettyButton, rawButton);
+  return tabs;
+}
+
+function renderRawTurnContent(turn, root) {
+  const payload = buildRawTurnPayload(turn);
+  const container = document.createElement("div");
+  container.className = "prompt";
+
+  const pre = document.createElement("pre");
+  pre.textContent = payload || "";
+  container.appendChild(pre);
+  root.appendChild(container);
+}
+
+function buildRawTurnPayload(turn) {
+  const sections = [];
+
+  if (turn.prompt?.raw) {
+    sections.push(
+      `Prompt (line ${turn.prompt.lineNumber})\n${stringifyRawValue(turn.prompt.raw)}`,
+    );
+  }
+
+  if (Array.isArray(turn.continuationPrompts)) {
+    turn.continuationPrompts.forEach((event, index) => {
+      sections.push(
+        `Compacted Context ${index + 1} (line ${event.lineNumber})\n${stringifyRawValue(event.raw)}`,
+      );
+    });
+  }
+
+  turn.events.forEach((event, index) => {
+    sections.push(
+      `Event ${index + 1}: ${event.summary} (line ${event.lineNumber})\n${stringifyRawValue(event.raw)}`,
+    );
+  });
+
+  return sections.join("\n\n");
+}
+
+function stringifyRawValue(value) {
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch (_error) {
+    return String(value ?? "");
+  }
+}
+
+function renderTurnChanges(session, turn, root, query) {
+  const stats = turn.changeStats || { filesChanged: 0, totalOperations: 0 };
+  const fileLabel = stats.filesChanged === 1 ? "file" : "files";
+  const turnKey = `${session.id}:${turn.id}`;
+  const hasSavedOpenState = Object.prototype.hasOwnProperty.call(
+    state.turnChangesOpenByKey,
+    turnKey,
+  );
+  const matchesQuery =
+    Boolean(query) && (turn.searchBlob || "").includes(query);
+
+  const details = document.createElement("details");
+  details.className = "event";
+  details.open = query
+    ? matchesQuery
+    : hasSavedOpenState
+      ? Boolean(state.turnChangesOpenByKey[turnKey])
+      : false;
+  details.addEventListener("toggle", () => {
+    state.turnChangesOpenByKey[turnKey] = details.open;
+  });
+
+  const summary = document.createElement("summary");
   const title = document.createElement("div");
   title.className = "section-title";
-  title.textContent = "Assistant made these changes:";
-  head.appendChild(title);
+  title.textContent = `Assistant made these changes (${stats.filesChanged} ${fileLabel})`;
 
-  const stats = turn.changeStats || { filesChanged: 0, totalOperations: 0 };
-  head.append(
-    makeBadge(`Files changed: ${stats.filesChanged}`),
-    makeBadge(`Edit operations: ${stats.totalOperations}`),
-    makeBadge(state.showLineNumbers ? "Line numbers: on" : "Line numbers: off"),
-  );
+  const meta = document.createElement("div");
+  meta.className = "event-meta";
+  meta.textContent = `Edit operations: ${stats.totalOperations}`;
 
-  section.appendChild(head);
+  summary.append(title, meta);
+  details.appendChild(summary);
+
+  const body = document.createElement("div");
+  body.className = "event-body";
+
+  const section = document.createElement("div");
+  section.className = "changes-card";
 
   if (!turn.changedFiles || turn.changedFiles.length === 0) {
     const message = document.createElement("div");
     message.className = "event-meta";
-    message.textContent = "No explicit Edit/Write file changes were captured for this prompt.";
+    message.textContent =
+      "No explicit Edit/Write file changes were captured for this prompt.";
     section.appendChild(message);
-    root.appendChild(section);
+    body.appendChild(section);
+    details.appendChild(body);
+    root.appendChild(details);
     return;
   }
 
-  const turnKey = `${session.id}:${turn.id}`;
   const activePath =
-    state.activeFileTabByTurn[turnKey] && turn.changedFiles.some(f => f.filePath === state.activeFileTabByTurn[turnKey])
+    state.activeFileTabByTurn[turnKey] &&
+    turn.changedFiles.some(
+      (f) => f.filePath === state.activeFileTabByTurn[turnKey],
+    )
       ? state.activeFileTabByTurn[turnKey]
       : turn.changedFiles[0].filePath;
 
@@ -1726,16 +1979,20 @@ function renderTurnChanges(session, turn, root) {
     tab.textContent = `${file.displayPath} (${file.operations.length})`;
     tab.addEventListener("click", () => {
       state.activeFileTabByTurn[turnKey] = file.filePath;
+      state.turnChangesOpenByKey[turnKey] = details.open;
       renderContent();
     });
     tabs.appendChild(tab);
   }
   section.appendChild(tabs);
 
-  const selectedFile = turn.changedFiles.find(file => file.filePath === activePath) || turn.changedFiles[0];
+  const selectedFile =
+    turn.changedFiles.find((file) => file.filePath === activePath) ||
+    turn.changedFiles[0];
   section.appendChild(renderSelectedFileTab(selectedFile));
-
-  root.appendChild(section);
+  body.appendChild(section);
+  details.appendChild(body);
+  root.appendChild(details);
 }
 
 function renderSelectedFileTab(file) {
@@ -1753,11 +2010,9 @@ function renderSelectedFileTab(file) {
   const actions = document.createElement("div");
   actions.className = "actions";
   actions.append(
-    makeButton(
-      "Copy File Path",
-      () => copyToClipboard(file.filePath),
-      { feedbackLabel: "Copied" },
-    ),
+    makeButton("Copy File Path", () => copyToClipboard(file.filePath), {
+      feedbackLabel: "Copied",
+    }),
     makeButton(
       "Copy All Changed Code",
       () => copyToClipboard(joinFileChangeCode(file)),
@@ -1784,7 +2039,12 @@ function renderSelectedFileTab(file) {
 
     const badges = document.createElement("div");
     badges.className = "badges";
-    badges.append(makeBadge(`Status: ${operation.status}`, operation.status === "error" ? "error" : ""));
+    badges.append(
+      makeBadge(
+        `Status: ${operation.status}`,
+        operation.status === "error" ? "error" : "",
+      ),
+    );
     if (operation.toolUseId) {
       badges.append(makeBadge(`Tool Use ID: ${operation.toolUseId}`, "tool"));
     }
@@ -1802,7 +2062,9 @@ function renderSelectedFileTab(file) {
     }
 
     if (operation.kind === "edit") {
-      opBody.appendChild(renderDiffComparison(operation.oldText || "", operation.newText || ""));
+      opBody.appendChild(
+        renderDiffComparison(operation.oldText || "", operation.newText || ""),
+      );
     } else if (operation.kind === "write") {
       opBody.appendChild(renderDiffComparison("", operation.content || ""));
     }
@@ -1850,7 +2112,7 @@ function renderDiffComparison(oldText, newText) {
   rightBody.className = "diff-body";
   rightPane.append(rightTitle, rightBody);
 
-  diffRows.forEach(row => {
+  diffRows.forEach((row) => {
     const leftRow = document.createElement("div");
     leftRow.className = `diff-row ${row.type === "remove" ? "remove" : row.type === "context" ? "context" : "blank"}`;
     leftRow.textContent = formatDiffLine(row.oldLine, row.oldText);
@@ -1877,9 +2139,6 @@ function formatTurnSubline(turn) {
 
   parts.push(`Assistant: ${turn.stats.assistantMessages}`);
   parts.push(`Thinking: ${turn.stats.assistantThinking}`);
-  parts.push(`Tool Calls: ${turn.stats.toolUses}`);
-  parts.push(`Tool Results: ${turn.stats.toolResults}`);
-  parts.push(`Files Changed: ${turn.changeStats?.filesChanged || 0}`);
   parts.push(`Compacted Context: ${turn.continuationPrompts?.length || 0}`);
 
   if (turn.referencedFiles.length > 0) {
@@ -1897,7 +2156,9 @@ function joinFileChangeCode(file) {
         `# ${file.filePath}\n## Edit (old_string)\n${operation.oldText || ""}\n\n## Edit (new_string)\n${operation.newText || ""}`,
       );
     } else if (operation.kind === "write") {
-      chunks.push(`# ${file.filePath}\n## Write (content)\n${operation.content || ""}`);
+      chunks.push(
+        `# ${file.filePath}\n## Write (content)\n${operation.content || ""}`,
+      );
     }
   }
   return chunks.join("\n\n");
@@ -2298,7 +2559,15 @@ function highlightSearchHits(root, queryRaw) {
   const queryLower = query.toLowerCase();
   let hits = 0;
   const textNodes = [];
-  const skipTags = new Set(["SCRIPT", "STYLE", "NOSCRIPT", "TEXTAREA", "INPUT", "SELECT", "OPTION"]);
+  const skipTags = new Set([
+    "SCRIPT",
+    "STYLE",
+    "NOSCRIPT",
+    "TEXTAREA",
+    "INPUT",
+    "SELECT",
+    "OPTION",
+  ]);
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
     acceptNode(node) {
       if (!node.nodeValue || !node.nodeValue.trim()) {
@@ -2338,7 +2607,9 @@ function highlightSearchHits(root, queryRaw) {
 
     while (index !== -1) {
       if (index > cursor) {
-        fragment.appendChild(document.createTextNode(text.slice(cursor, index)));
+        fragment.appendChild(
+          document.createTextNode(text.slice(cursor, index)),
+        );
       }
       const mark = document.createElement("mark");
       mark.className = "search-hit";
@@ -2418,7 +2689,11 @@ function applyActiveSearchHit(scrollIntoView) {
 
   if (scrollIntoView) {
     openAncestorDetails(node);
-    node.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
+    node.scrollIntoView({
+      behavior: "smooth",
+      block: "center",
+      inline: "nearest",
+    });
   }
 }
 
@@ -2428,7 +2703,8 @@ function goToSearchHit(step) {
   }
 
   const total = state.searchHitNodes.length;
-  const current = state.activeSearchHitIndex < 0 ? 0 : state.activeSearchHitIndex;
+  const current =
+    state.activeSearchHitIndex < 0 ? 0 : state.activeSearchHitIndex;
   state.activeSearchHitIndex = (current + step + total) % total;
   applyActiveSearchHit(true);
 }
@@ -2461,15 +2737,25 @@ function showMessage(message) {
 
 function removeSession(sessionId) {
   state.sessions.delete(sessionId);
-  state.sessionOrder = state.sessionOrder.filter(id => id !== sessionId);
-  Object.keys(state.turnOpenByKey).forEach(key => {
+  state.sessionOrder = state.sessionOrder.filter((id) => id !== sessionId);
+  Object.keys(state.turnOpenByKey).forEach((key) => {
     if (key.startsWith(`${sessionId}:`)) {
       delete state.turnOpenByKey[key];
     }
   });
-  Object.keys(state.activeFileTabByTurn).forEach(key => {
+  Object.keys(state.turnChangesOpenByKey).forEach((key) => {
+    if (key.startsWith(`${sessionId}:`)) {
+      delete state.turnChangesOpenByKey[key];
+    }
+  });
+  Object.keys(state.activeFileTabByTurn).forEach((key) => {
     if (key.startsWith(`${sessionId}:`)) {
       delete state.activeFileTabByTurn[key];
+    }
+  });
+  Object.keys(state.turnViewModeByKey).forEach((key) => {
+    if (key.startsWith(`${sessionId}:`)) {
+      delete state.turnViewModeByKey[key];
     }
   });
 
@@ -2482,7 +2768,8 @@ function removeSession(sessionId) {
   }
 
   if (state.rightSessionId === sessionId) {
-    state.rightSessionId = state.sessionOrder.find(id => id !== state.leftSessionId) || null;
+    state.rightSessionId =
+      state.sessionOrder.find((id) => id !== state.leftSessionId) || null;
   }
 
   if (state.sessionOrder.length < 2) {
@@ -2570,7 +2857,9 @@ function formatTimestamp(value) {
 }
 
 function oneLine(value) {
-  return String(value || "").replace(/\s+/g, " ").trim();
+  return String(value || "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function truncate(value, maxLength) {
@@ -2578,6 +2867,52 @@ function truncate(value, maxLength) {
     return "";
   }
   return value.length > maxLength ? `${value.slice(0, maxLength)}...` : value;
+}
+
+function extractAssistantText(raw, textBlocks) {
+  const parts = [];
+
+  for (const block of textBlocks || []) {
+    pushUniqueText(parts, block?.text);
+  }
+
+  const content = raw?.message?.content;
+  if (typeof content === "string") {
+    pushUniqueText(parts, content);
+  } else if (Array.isArray(content)) {
+    for (const block of content) {
+      if (!block || typeof block !== "object") {
+        continue;
+      }
+      pushUniqueText(parts, block.text);
+      pushUniqueText(parts, block.content);
+      pushUniqueText(parts, block.output_text);
+      pushUniqueText(parts, block.value);
+    }
+  }
+
+  pushUniqueText(parts, raw?.message?.output_text);
+  pushUniqueText(parts, raw?.output_text);
+  pushUniqueText(parts, raw?.content);
+
+  if (parts.length === 0 && content != null) {
+    pushUniqueText(parts, flattenValue(content));
+  }
+
+  return parts.join("\n\n").trim();
+}
+
+function pushUniqueText(parts, value) {
+  if (typeof value !== "string") {
+    return;
+  }
+  const text = value.trim();
+  if (!text) {
+    return;
+  }
+  if (!parts.includes(text)) {
+    parts.push(text);
+  }
 }
 
 function collectSearchBlob(value) {
@@ -2630,12 +2965,12 @@ function flattenValue(value) {
   }
 
   if (Array.isArray(value)) {
-    return value.map(item => flattenValue(item)).join("\n");
+    return value.map((item) => flattenValue(item)).join("\n");
   }
 
   if (typeof value === "object") {
     return Object.values(value)
-      .map(item => flattenValue(item))
+      .map((item) => flattenValue(item))
       .join("\n");
   }
 

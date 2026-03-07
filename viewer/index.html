@@ -10,7 +10,10 @@
     <header class="topbar">
       <div class="title-wrap">
         <h1>Session Log Viewer</h1>
-        <p>Prompt-by-prompt history with tool actions, metadata, search, and comparison</p>
+        <p>
+          Prompt-by-prompt history with tool actions, metadata, search, and
+          comparison
+        </p>
       </div>
       <div class="controls-row">
         <button id="refreshButton" type="button">Refresh Log Directory</button>
@@ -24,8 +27,22 @@
         />
         <div id="searchHits" class="search-hits" hidden>
           <span id="searchHitCount">0 hits</span>
-          <button id="searchPrevButton" type="button" title="Previous search hit" aria-label="Previous search hit">▲</button>
-          <button id="searchNextButton" type="button" title="Next search hit" aria-label="Next search hit">▼</button>
+          <button
+            id="searchPrevButton"
+            type="button"
+            title="Previous search hit"
+            aria-label="Previous search hit"
+          >
+            ▲
+          </button>
+          <button
+            id="searchNextButton"
+            type="button"
+            title="Next search hit"
+            aria-label="Next search hit"
+          >
+            ▼
+          </button>
         </div>
         <label class="toggle-label" for="lineNumbersToggle">
           <input id="lineNumbersToggle" type="checkbox" />
@@ -43,8 +60,16 @@
       <aside class="sidebar">
         <h2>Log Directory Files</h2>
         <div class="dir-controls">
-          <button id="chooseDirButton" type="button">Choose Directory...</button>
-          <input id="directoryInput" type="file" webkitdirectory directory multiple />
+          <button id="chooseDirButton" type="button">
+            Choose Directory...
+          </button>
+          <input
+            id="directoryInput"
+            type="file"
+            webkitdirectory
+            directory
+            multiple
+          />
         </div>
         <p class="sidebar-meta" id="logDirPath">-</p>
         <div id="serverFiles" class="server-files"></div>

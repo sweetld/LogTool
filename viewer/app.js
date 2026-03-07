@@ -2196,11 +2196,23 @@ function buildSessionTurnCopyText(session) {
   const turns = Array.isArray(session?.turns)
     ? session.turns.filter((turn) => turn.prompt != null)
     : [];
-    if (turns.length === 0) {
-        return "";
-    }
+  const modelLanes = Array.isArray(session?.meta?.modelLanes)
+    ? session.meta.modelLanes.join(", ") || "-"
+    : "-";
+  const taskIds = Array.isArray(session?.meta?.taskIds)
+    ? session.meta.taskIds.join(", ") || "-"
+    : "-";
+  const metaLabelWidth = 42;
+  const lines = [
+    `Model Lanes:`.padEnd(metaLabelWidth) + modelLanes,
+    `Task IDs:`.padEnd(metaLabelWidth) + taskIds,
+  ];
 
-  const lines = [];
+  if (turns.length === 0) {
+    return lines.join("\n");
+  }
+
+  lines.push("");
   for (const turn of turns) {
     const assistantEntries = getTurnAssistantResponseEntries(turn);
     const hasRealAssistantResponse = assistantEntries.some(
@@ -2236,7 +2248,7 @@ function buildSessionTurnCopyText(session) {
         lines.push("");
     }
 
-  return lines.join("\n").trim();
+  return lines.join("\n").trimEnd();
 }
 
 function isNoResponseRequestedText(text) {

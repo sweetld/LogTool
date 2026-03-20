@@ -1990,35 +1990,53 @@ function renderTurnChanges(session, turn, root, query) {
 
   const tabs = document.createElement("div");
   tabs.className = "file-tabs";
+
+  const activePanelHost = document.createElement("div");
+  activePanelHost.dataset.fileActivePanel = "1";
+
+  const hiddenPanels = document.createElement("div");
+  hiddenPanels.className = "file-tab-panels";
+  hiddenPanels.dataset.fileHiddenPanels = "1";
+  hiddenPanels.hidden = true;
+
   for (const file of turn.changedFiles) {
     const tab = document.createElement("button");
     tab.type = "button";
     tab.className = "file-tab";
+    tab.dataset.fileTab = "1";
+    tab.dataset.filePath = file.filePath;
     if (file.filePath === activePath) {
       tab.classList.add("active");
     }
     tab.textContent = `${file.displayPath} (${file.operations.length})`;
-    tab.addEventListener("click", () => {
-      state.activeFileTabByTurn[turnKey] = file.filePath;
-      state.turnChangesOpenByKey[turnKey] = details.open;
-      renderContent();
+    tab.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      activateChangePanel(section, file.filePath, turnKey);
     });
     tabs.appendChild(tab);
   }
   section.appendChild(tabs);
 
-  const selectedFile =
-    turn.changedFiles.find((file) => file.filePath === activePath) ||
-    turn.changedFiles[0];
-  section.appendChild(renderSelectedFileTab(selectedFile));
+  for (const file of turn.changedFiles) {
+    const panel = renderSelectedFileTab(file, turnKey);
+    hiddenPanels.appendChild(panel);
+  }
+
+  section.appendChild(activePanelHost);
+  section.appendChild(hiddenPanels);
+  activateChangePanel(section, activePath, turnKey);
   body.appendChild(section);
   details.appendChild(body);
   root.appendChild(details);
 }
 
-function renderSelectedFileTab(file) {
+function renderSelectedFileTab(file, turnKey) {
   const wrap = document.createElement("div");
   wrap.className = "file-change-body";
+  wrap.dataset.filePanel = "1";
+  wrap.dataset.filePath = file.filePath;
+  wrap.dataset.turnKey = turnKey;
 
     const headerRow = document.createElement("div");
     headerRow.className = "file-change-header";
@@ -2129,6 +2147,9 @@ function renderDiffComparison(oldText, newText) {
   leftTitle.textContent = `Before (-${stats.removed})`;
   const leftBody = document.createElement("div");
   leftBody.className = "diff-body";
+  const leftInner = document.createElement("div");
+  leftInner.className = "diff-body-inner";
+  leftBody.appendChild(leftInner);
   leftPane.append(leftTitle, leftBody);
 
   const rightPane = document.createElement("div");
@@ -2138,18 +2159,21 @@ function renderDiffComparison(oldText, newText) {
   rightTitle.textContent = `After (+${stats.added})`;
   const rightBody = document.createElement("div");
   rightBody.className = "diff-body";
+  const rightInner = document.createElement("div");
+  rightInner.className = "diff-body-inner";
+  rightBody.appendChild(rightInner);
   rightPane.append(rightTitle, rightBody);
 
   diffRows.forEach((row) => {
     const leftRow = document.createElement("div");
     leftRow.className = `diff-row ${row.type === "remove" ? "remove" : row.type === "context" ? "context" : "blank"}`;
     leftRow.textContent = formatDiffLine(row.oldLine, row.oldText);
-    leftBody.appendChild(leftRow);
+    leftInner.appendChild(leftRow);
 
     const rightRow = document.createElement("div");
     rightRow.className = `diff-row ${row.type === "add" ? "add" : row.type === "context" ? "context" : "blank"}`;
     rightRow.textContent = formatDiffLine(row.newLine, row.newText);
-    rightBody.appendChild(rightRow);
+    rightInner.appendChild(rightRow);
   });
 
   wirePairedScroll(leftBody, rightBody, () => state.syncDiffScroll);
@@ -2670,7 +2694,11 @@ function updateSearchHits(hitCount) {
   const count = Number.isFinite(hitCount) ? hitCount : 0;
   dom.searchHits.hidden = false;
   if (dom.searchHitCount) {
-    dom.searchHitCount.textContent = `${count} hit${count === 1 ? "" : "s"}`;
+    if (count > 0 && state.activeSearchHitIndex >= 0) {
+      dom.searchHitCount.textContent = `${state.activeSearchHitIndex + 1} / ${count}`;
+    } else {
+      dom.searchHitCount.textContent = `${count} hit${count === 1 ? "" : "s"}`;
+    }
   }
   if (dom.searchPrevButton) {
     dom.searchPrevButton.disabled = !canNavigate;
@@ -2819,6 +2847,7 @@ function applyActiveSearchHit(scrollIntoView) {
   }
 
   const node = state.searchHitNodes[state.activeSearchHitIndex];
+  revealSearchHitContext(node);
   node.classList.add("search-hit-active");
 
   if (scrollIntoView) {
@@ -2841,6 +2870,7 @@ function goToSearchHit(step) {
     state.activeSearchHitIndex < 0 ? 0 : state.activeSearchHitIndex;
   state.activeSearchHitIndex = (current + step + total) % total;
   applyActiveSearchHit(true);
+  updateSearchHits(total);
 }
 
 function openAncestorDetails(node) {
@@ -2851,6 +2881,70 @@ function openAncestorDetails(node) {
     }
     parent = parent.parentElement;
   }
+}
+
+function activateChangePanel(card, filePath, turnKey) {
+  if (!(card instanceof Element)) {
+    return;
+  }
+
+  const activePanelHost = card.querySelector("[data-file-active-panel='1']");
+  const hiddenPanels = card.querySelector("[data-file-hidden-panels='1']");
+  if (!(activePanelHost instanceof Element) || !(hiddenPanels instanceof Element)) {
+    return;
+  }
+
+  const panels = [...card.querySelectorAll("[data-file-panel='1']")];
+  const selectedPanel =
+    panels.find((panel) => panel.dataset.filePath === filePath) || panels[0];
+  if (!(selectedPanel instanceof Element)) {
+    return;
+  }
+
+  const selectedPath = selectedPanel.dataset.filePath || filePath || "";
+  for (const tab of card.querySelectorAll("[data-file-tab='1']")) {
+    tab.classList.toggle("active", tab.dataset.filePath === selectedPath);
+  }
+
+  for (const panel of panels) {
+    if (panel === selectedPanel) {
+      activePanelHost.replaceChildren(panel);
+    } else {
+      hiddenPanels.appendChild(panel);
+    }
+  }
+
+  if (turnKey && selectedPath) {
+    state.activeFileTabByTurn[turnKey] = selectedPath;
+    state.turnChangesOpenByKey[turnKey] = true;
+  }
+
+  const details = card.closest("details");
+  if (details instanceof HTMLDetailsElement) {
+    details.open = true;
+  }
+}
+
+function revealSearchHitContext(node) {
+  if (!(node instanceof Element)) {
+    return;
+  }
+
+  const panel = node.closest("[data-file-panel='1']");
+  if (!(panel instanceof Element)) {
+    return;
+  }
+
+  const card = panel.closest(".changes-card");
+  if (!(card instanceof Element)) {
+    return;
+  }
+
+  activateChangePanel(
+    card,
+    panel.dataset.filePath || "",
+    panel.dataset.turnKey || "",
+  );
 }
 
 function makeEmpty(message) {

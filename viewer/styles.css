@@ -726,6 +726,11 @@ mark.search-hit.search-hit-active {
   overflow: auto;
 }
 
+.diff-body-inner {
+  min-width: 100%;
+  width: max-content;
+}
+
 .diff-row {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono",
     monospace;

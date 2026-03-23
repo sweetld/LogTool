@@ -16,7 +16,7 @@
         </p>
       </div>
       <div class="controls-row">
-        <button id="refreshButton" type="button">Refresh Log Directory</button>
+        <button id="refreshButton" type="button">Refresh Current Root</button>
           <label class="file-label" for="uploadInput"
           >Load JSONL/NDJSON File(s)</label
           >
@@ -63,24 +63,27 @@
       </div>
     </header>
 
-    <div class="layout">
+    <div id="layout" class="layout">
       <aside class="sidebar">
-        <h2>Log Directory Files</h2>
-        <div class="dir-controls">
-          <button id="chooseDirButton" type="button">
-            Choose Directory...
-          </button>
-          <input
-            id="directoryInput"
-            type="file"
-            webkitdirectory
-            directory
-            multiple
-          />
+        <h2>Available Logs</h2>
+        <div class="dir-picker-card">
+          <div class="dir-picker-label">Current Root</div>
+          <p class="sidebar-path" id="logDirPath">-</p>
+          <button id="chooseDirButton" type="button">Choose Root Directory...</button>
         </div>
-        <p class="sidebar-meta" id="logDirPath">-</p>
         <div id="serverFiles" class="server-files"></div>
       </aside>
+
+      <div
+        id="sidebarResizeHandle"
+        class="sidebar-resize-handle"
+        role="separator"
+        aria-label="Resize left sidebar"
+        aria-orientation="vertical"
+        aria-valuemin="220"
+        aria-valuemax="720"
+        tabindex="0"
+      ></div>
 
       <main class="main-panel">
         <div id="tabs" class="tabs"></div>

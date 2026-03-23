@@ -10,6 +10,10 @@
   --tool: #e4f0fb;
   --prompt: #dce8f3;
   --meta: #edf3f8;
+  --sidebar-width: 280px;
+  --sidebar-min-width: 220px;
+  --sidebar-max-width: 720px;
+  --sidebar-resize-handle-width: 10px;
 }
 
 * {
@@ -29,6 +33,11 @@ body {
 body {
   display: flex;
   flex-direction: column;
+}
+
+body.is-resizing {
+  cursor: col-resize;
+  user-select: none;
 }
 
 h1,
@@ -160,44 +169,85 @@ button:hover {
 .layout {
   min-height: 0;
   display: grid;
-  grid-template-columns: 280px 1fr;
+  grid-template-columns: var(--sidebar-width) var(--sidebar-resize-handle-width) minmax(0, 1fr);
   flex: 1;
 }
 
 .sidebar {
+  min-width: 0;
   border-right: 1px solid var(--border);
   padding: 12px;
   overflow: auto;
   background: #eef4f9;
 }
 
+.sidebar-resize-handle {
+  position: relative;
+  cursor: col-resize;
+  background: linear-gradient(
+    to right,
+    rgba(184, 202, 219, 0.15),
+    rgba(184, 202, 219, 0.65),
+    rgba(184, 202, 219, 0.15)
+  );
+}
+
+.sidebar-resize-handle::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 4px;
+  height: 52px;
+  transform: translate(-50%, -50%);
+  border-radius: 999px;
+  background: rgba(60, 139, 198, 0.55);
+}
+
+.sidebar-resize-handle:hover,
+.sidebar-resize-handle:focus-visible,
+body.is-resizing .sidebar-resize-handle {
+  background: linear-gradient(
+    to right,
+    rgba(94, 165, 220, 0.18),
+    rgba(94, 165, 220, 0.8),
+    rgba(94, 165, 220, 0.18)
+  );
+}
+
+.sidebar-resize-handle:focus-visible {
+  outline: 2px solid rgba(60, 139, 198, 0.45);
+  outline-offset: -1px;
+}
+
 .sidebar h2 {
   font-size: 14px;
-  margin-bottom: 8px;
-}
-
-.dir-controls {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-bottom: 8px;
-}
-
-.dir-controls button {
-  font-size: 11px;
-  padding: 5px 8px;
-  white-space: nowrap;
-}
-
-#directoryInput {
-  display: none;
-}
-
-.sidebar-meta {
-  color: var(--muted);
-  font-size: 12px;
   margin-bottom: 10px;
+}
+
+.dir-picker-card {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.dir-picker-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.sidebar-path {
+  color: #31475b;
+  font-size: 12px;
+  line-height: 1.45;
   word-break: break-all;
+}
+
+#chooseDirButton {
+  width: 100%;
 }
 
 .server-files {
@@ -232,6 +282,7 @@ button:hover {
 
 .main-panel {
   min-height: 0;
+  min-width: 0;
   display: grid;
   grid-template-rows: auto auto 1fr;
 }
@@ -818,6 +869,10 @@ mark.search-hit.search-hit-active {
   .sidebar {
     border-right: none;
     border-bottom: 1px solid var(--border);
+  }
+
+  .sidebar-resize-handle {
+    display: none;
   }
 
   .split {

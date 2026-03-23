@@ -4,8 +4,11 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import mimetypes
+import subprocess
+import sys
 from datetime import datetime, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -17,6 +20,8 @@ DEFAULT_LOG_DIR = ROOT_DIR / "log"
 DEFAULT_UI_DIR = ROOT_DIR / "viewer"
 STATE_FILE = ROOT_DIR / ".session_viewer_state.json"
 SUPPORTED_LOG_SUFFIXES = {".jsonl", ".ndjson"}
+MODEL_LANES = ("model_a", "model_b")
+CLAUDE_PROJECTS_DIR = Path.home() / ".claude" / "projects"
 
 
 def read_persisted_log_dir(state_file: Path) -> Path | None:
@@ -48,6 +53,325 @@ def write_persisted_log_dir(state_file: Path, log_dir: Path) -> None:
     state_file.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
+def resolve_existing_directory(path_input: str) -> Path:
+    requested = Path(path_input.strip()).expanduser()
+    try:
+        resolved = requested.resolve()
+    except OSError as exc:
+        raise ValueError(f"Invalid directory path: {exc}") from exc
+
+    if not resolved.exists():
+        raise FileNotFoundError(f"Directory not found: {resolved}")
+    if not resolved.is_dir():
+        raise NotADirectoryError(f"Path is not a directory: {resolved}")
+    return resolved
+
+
+def pick_log_dir_with_native_dialog(initial_dir: Path) -> Path | None:
+    picker_script = """
+import json
+import sys
+from pathlib import Path
+
+try:
+    import tkinter as tk
+    from tkinter import filedialog
+except Exception as exc:
+    print(json.dumps({"error": f"Native directory picker unavailable: {exc}"}))
+    raise SystemExit(2)
+
+initial_dir = sys.argv[1] if len(sys.argv) > 1 else str(Path.home())
+root = tk.Tk()
+root.withdraw()
+try:
+    root.attributes("-topmost", True)
+except Exception:
+    pass
+root.update()
+selected = filedialog.askdirectory(
+    initialdir=initial_dir,
+    mustexist=True,
+    title="Select Session Log Root",
+)
+root.destroy()
+print(json.dumps({"path": selected or None}))
+"""
+    try:
+        result = subprocess.run(
+            [sys.executable, "-c", picker_script, str(initial_dir)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError as exc:
+        raise RuntimeError(f"Failed to open native directory picker: {exc}") from exc
+
+    stdout = result.stdout.strip()
+    stderr = result.stderr.strip()
+    payload: dict = {}
+    if stdout:
+        try:
+            payload = json.loads(stdout)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(
+                f"Native directory picker returned invalid output: {stdout}"
+            ) from exc
+
+    if result.returncode != 0:
+        message = payload.get("error") if isinstance(payload, dict) else None
+        raise RuntimeError(message or stderr or "Native directory picker failed")
+
+    selected_path = payload.get("path") if isinstance(payload, dict) else None
+    if not selected_path:
+        return None
+    return resolve_existing_directory(str(selected_path))
+
+
+def posix_path(path: Path) -> str:
+    return path.as_posix()
+
+
+def encode_server_file_id(source_kind: str, lane: str | None, path: Path) -> str:
+    raw = json.dumps(
+        {
+            "source_kind": source_kind,
+            "lane": lane,
+            "path": str(path.resolve()),
+        },
+        sort_keys=True,
+    )
+    return base64.urlsafe_b64encode(raw.encode("utf-8")).decode("ascii").rstrip("=")
+
+
+def make_file_entry(
+    path: Path,
+    *,
+    display_name: str,
+    source_kind: str,
+    source_label: str,
+    lane: str | None,
+    auto_load: bool = False,
+) -> dict | None:
+    try:
+        stat = path.stat()
+    except OSError:
+        return None
+
+    return {
+        "id": encode_server_file_id(source_kind, lane, path),
+        "name": display_name,
+        "size_bytes": stat.st_size,
+        "modified_at": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
+        "source_kind": source_kind,
+        "source_label": source_label,
+        "lane": lane,
+        "auto_load": auto_load,
+        "_mtime": stat.st_mtime,
+        "_path": path,
+    }
+
+
+def is_supported_log_file(path: Path) -> bool:
+    return path.is_file() and path.suffix.lower() in SUPPORTED_LOG_SUFFIXES
+
+
+def is_excluded_log_path(path: Path) -> bool:
+    lowered_parts = {part.lower() for part in path.parts}
+    stem = path.stem.lower()
+    return (
+        stem.endswith("_raw")
+        or "original_sessions" in lowered_parts
+        or "subagents" in lowered_parts
+        or "memory" in lowered_parts
+    )
+
+
+def sanitize_claude_project_dir(cwd: Path) -> str:
+    text = str(cwd.resolve())
+    return text.replace("\\", "-").replace("/", "-").replace(":", "")
+
+
+def resolve_experiment_root_and_lanes(selected_dir: Path) -> tuple[Path, list[str]] | None:
+    resolved = selected_dir.resolve()
+
+    if resolved.name in MODEL_LANES:
+        if resolved.parent.name == "logs":
+            return resolved.parent.parent, [resolved.name]
+        return resolved.parent, [resolved.name]
+
+    if resolved.name == "logs":
+        root = resolved.parent
+        lanes = [lane for lane in MODEL_LANES if (resolved / lane).is_dir() or (root / lane).is_dir()]
+        return (root, lanes) if lanes else None
+
+    lanes = [lane for lane in MODEL_LANES if (resolved / lane).is_dir() or (resolved / "logs" / lane).is_dir()]
+    return (resolved, lanes) if lanes else None
+
+
+def iter_processed_logs(experiment_root: Path, lane: str) -> list[dict]:
+    lane_dir = experiment_root / "logs" / lane
+    if not lane_dir.is_dir():
+        return []
+
+    entries = []
+    for path in sorted(lane_dir.rglob("*")):
+        if not is_supported_log_file(path) or is_excluded_log_path(path):
+            continue
+        rel = path.relative_to(experiment_root)
+        entry = make_file_entry(
+            path,
+            display_name=posix_path(rel),
+            source_kind="processed",
+            source_label="Processed log",
+            lane=lane,
+        )
+        if entry:
+            entries.append(entry)
+    return entries
+
+
+def iter_live_claude_logs(experiment_root: Path, lane: str) -> list[dict]:
+    model_dir = experiment_root / lane
+    if not model_dir.is_dir() or not CLAUDE_PROJECTS_DIR.is_dir():
+        return []
+
+    project_dir = CLAUDE_PROJECTS_DIR / sanitize_claude_project_dir(model_dir)
+    if not project_dir.is_dir():
+        return []
+
+    candidates: list[Path] = []
+    for path in project_dir.glob("*.jsonl"):
+        if is_supported_log_file(path) and not is_excluded_log_path(path):
+            candidates.append(path)
+
+    for path in project_dir.glob("*/*.jsonl"):
+        if is_supported_log_file(path) and not is_excluded_log_path(path):
+            candidates.append(path)
+
+    unique_candidates = sorted({candidate.resolve() for candidate in candidates})
+    entries = []
+    for path in unique_candidates:
+        if path.parent.name == "subagents":
+            continue
+        suffix = posix_path(path.relative_to(project_dir).parent)
+        display_name = f"live/{lane}/{path.name}" if suffix == "." else f"live/{lane}/{suffix}/{path.name}"
+        entry = make_file_entry(
+            path,
+            display_name=display_name,
+            source_kind="live",
+            source_label="Live Claude transcript",
+            lane=lane,
+        )
+        if entry:
+            entries.append(entry)
+    return entries
+
+
+def iter_direct_logs(log_dir: Path) -> list[dict]:
+    if not log_dir.is_dir():
+        return []
+
+    entries = []
+    for path in sorted(log_dir.iterdir()):
+        if not is_supported_log_file(path) or is_excluded_log_path(path):
+            continue
+        entry = make_file_entry(
+            path,
+            display_name=path.name,
+            source_kind="direct",
+            source_label="Directory log",
+            lane=None,
+            auto_load=True,
+        )
+        if entry:
+            entries.append(entry)
+    return entries
+
+
+def finalize_file_entries(entries: list[dict], *, experiment_mode: bool) -> list[dict]:
+    if experiment_mode:
+        by_lane: dict[str, list[dict]] = {lane: [] for lane in MODEL_LANES}
+        for entry in entries:
+            lane = entry.get("lane")
+            if lane in by_lane:
+                by_lane[lane].append(entry)
+
+        for lane_entries in by_lane.values():
+            lane_entries.sort(
+                key=lambda item: (
+                    0 if item["source_kind"] == "processed" else 1,
+                    -item["_mtime"],
+                    item["name"],
+                )
+            )
+            if lane_entries:
+                lane_entries[0]["auto_load"] = True
+
+        entries.sort(
+            key=lambda item: (
+                MODEL_LANES.index(item["lane"]) if item.get("lane") in MODEL_LANES else len(MODEL_LANES),
+                0 if item["source_kind"] == "processed" else 1,
+                -item["_mtime"],
+                item["name"],
+            )
+        )
+    else:
+        entries.sort(key=lambda item: (-item["_mtime"], item["name"]))
+
+    cleaned = []
+    for entry in entries:
+        cleaned.append({k: v for k, v in entry.items() if not k.startswith("_")})
+    return cleaned
+
+
+def discover_available_logs(log_dir: Path) -> dict:
+    experiment = resolve_experiment_root_and_lanes(log_dir)
+    if experiment is None:
+        return {
+            "log_dir": str(log_dir),
+            "root_dir": str(log_dir),
+            "log_dir_display": str(log_dir),
+            "discovery_mode": "direct",
+            "files": finalize_file_entries(iter_direct_logs(log_dir), experiment_mode=False),
+        }
+
+    experiment_root, lanes = experiment
+    entries: list[dict] = []
+    for lane in lanes:
+        entries.extend(iter_processed_logs(experiment_root, lane))
+        entries.extend(iter_live_claude_logs(experiment_root, lane))
+
+    if not entries:
+        return {
+            "log_dir": str(log_dir),
+            "root_dir": str(experiment_root),
+            "log_dir_display": f"{experiment_root} (no processed or live session logs found yet)",
+            "discovery_mode": "experiment",
+            "files": [],
+        }
+
+    return {
+        "log_dir": str(log_dir),
+        "root_dir": str(experiment_root),
+        "log_dir_display": f"{experiment_root} (processed logs + live Claude transcripts)",
+        "discovery_mode": "experiment",
+        "files": finalize_file_entries(entries, experiment_mode=True),
+    }
+
+
+def build_server_file_index(log_dir: Path) -> dict[str, Path]:
+    payload = discover_available_logs(log_dir)
+    return {
+        entry["id"]: Path(entry_path)
+        for entry in payload["files"]
+        for entry_path in [
+            json.loads(
+                base64.urlsafe_b64decode(entry["id"] + "=" * (-len(entry["id"]) % 4)).decode("utf-8")
+            )["path"]
+        ]
+    }
+
+
 class SessionViewerHandler(BaseHTTPRequestHandler):
     log_dir = DEFAULT_LOG_DIR
     ui_dir = DEFAULT_UI_DIR
@@ -69,6 +393,10 @@ class SessionViewerHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802 - inherited API
         parsed = urlparse(self.path)
 
+        if parsed.path == "/api/pick-log-dir":
+            self._handle_api_pick_log_dir()
+            return
+
         if parsed.path == "/api/log-dir":
             self._handle_api_log_dir()
             return
@@ -76,42 +404,21 @@ class SessionViewerHandler(BaseHTTPRequestHandler):
         self.send_error(HTTPStatus.NOT_FOUND)
 
     def _handle_api_files(self) -> None:
-        log_dir = type(self).log_dir
-        files = []
-        if log_dir.exists():
-            for path in sorted(log_dir.iterdir()):
-                if not path.is_file() or path.suffix.lower() not in SUPPORTED_LOG_SUFFIXES:
-                    continue
-                stat = path.stat()
-                files.append(
-                    {
-                        "name": path.name,
-                        "size_bytes": stat.st_size,
-                        "modified_at": datetime.fromtimestamp(
-                            stat.st_mtime, tz=timezone.utc
-                        ).isoformat(),
-                    }
-                )
-
-        self._send_json({"log_dir": str(log_dir), "files": files})
+        payload = discover_available_logs(type(self).log_dir)
+        self._send_json(payload)
 
     def _handle_api_file(self, query: str) -> None:
         params = parse_qs(query)
-        name = (params.get("name") or [None])[0]
+        file_id = (params.get("id") or [None])[0]
 
-        if not name:
-            self._send_json({"error": "Missing required query parameter: name"}, 400)
+        if not file_id:
+            self._send_json({"error": "Missing required query parameter: id"}, 400)
             return
 
-        if "/" in name or "\\" in name:
-            self._send_json({"error": "Invalid file name"}, 400)
-            return
-
-        log_root = type(self).log_dir.resolve()
-        requested = (log_root / name).resolve()
-
-        if requested.parent != log_root:
-            self._send_json({"error": "Invalid file path"}, 400)
+        file_index = build_server_file_index(type(self).log_dir)
+        requested = file_index.get(file_id)
+        if requested is None:
+            self._send_json({"error": "File not found for requested id"}, 404)
             return
 
         if requested.suffix.lower() not in SUPPORTED_LOG_SUFFIXES:
@@ -119,7 +426,7 @@ class SessionViewerHandler(BaseHTTPRequestHandler):
             return
 
         if not requested.exists() or not requested.is_file():
-            self._send_json({"error": f"File not found: {name}"}, 404)
+            self._send_json({"error": f"File not found: {requested.name}"}, 404)
             return
 
         try:
@@ -133,6 +440,30 @@ class SessionViewerHandler(BaseHTTPRequestHandler):
             content_type="text/plain; charset=utf-8",
             status=HTTPStatus.OK,
         )
+
+    def _apply_log_dir(self, resolved: Path) -> dict:
+        type(self).log_dir = resolved
+        payload = discover_available_logs(resolved)
+        try:
+            write_persisted_log_dir(type(self).state_file, resolved)
+        except OSError as exc:
+            payload["warning"] = f"Failed to persist selected directory: {exc}"
+        return payload
+
+    def _handle_api_pick_log_dir(self) -> None:
+        try:
+            selected = pick_log_dir_with_native_dialog(type(self).log_dir)
+        except RuntimeError as exc:
+            self._send_json({"error": str(exc)}, 500)
+            return
+
+        if selected is None:
+            self._send_json({"cancelled": True})
+            return
+
+        payload = self._apply_log_dir(selected)
+        payload["cancelled"] = False
+        self._send_json(payload)
 
     def _handle_api_log_dir(self) -> None:
         try:
@@ -156,27 +487,19 @@ class SessionViewerHandler(BaseHTTPRequestHandler):
             self._send_json({"error": "Missing required field: path"}, 400)
             return
 
-        requested = Path(path_input.strip()).expanduser()
         try:
-            resolved = requested.resolve()
-        except OSError as exc:
-            self._send_json({"error": f"Invalid directory path: {exc}"}, 400)
+            resolved = resolve_existing_directory(path_input)
+        except FileNotFoundError as exc:
+            self._send_json({"error": str(exc)}, 404)
+            return
+        except NotADirectoryError as exc:
+            self._send_json({"error": str(exc)}, 400)
+            return
+        except ValueError as exc:
+            self._send_json({"error": str(exc)}, 400)
             return
 
-        if not resolved.exists():
-            self._send_json({"error": f"Directory not found: {resolved}"}, 404)
-            return
-
-        if not resolved.is_dir():
-            self._send_json({"error": f"Path is not a directory: {resolved}"}, 400)
-            return
-
-        type(self).log_dir = resolved
-        payload = {"log_dir": str(resolved)}
-        try:
-            write_persisted_log_dir(type(self).state_file, resolved)
-        except OSError as exc:
-            payload["warning"] = f"Failed to persist selected directory: {exc}"
+        payload = self._apply_log_dir(resolved)
         self._send_json(payload)
 
     def _handle_static(self, path: str) -> None:
@@ -221,7 +544,6 @@ class SessionViewerHandler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def log_message(self, format_str: str, *args) -> None:  # noqa: A003
-        # Keep terminal output focused while still showing request basics.
         print(f"[{self.log_date_time_string()}] {self.address_string()} {format_str % args}")
 
 
@@ -234,7 +556,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--log-dir",
         default=str(DEFAULT_LOG_DIR),
-        help=f"Directory containing JSONL/NDJSON session files (default: {DEFAULT_LOG_DIR})",
+        help=f"Directory containing JSONL/NDJSON session files or an experiment root (default: {DEFAULT_LOG_DIR})",
     )
     parser.add_argument(
         "--ui-dir",

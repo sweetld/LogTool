@@ -2,9 +2,6 @@ const state = {
   logDir: "",
   serverLogDir: "",
   serverFiles: [],
-  fileListMode: "server",
-  localFiles: [],
-  currentDirectoryHandle: null,
   sessions: new Map(),
   sessionOrder: [],
   activeSessionId: null,
@@ -27,12 +24,18 @@ const state = {
 
 const PATH_REGEX =
   /(?:\.{1,2}\/)?(?:[A-Za-z0-9._-]+\/)+[A-Za-z0-9._-]+\.[A-Za-z0-9_-]+|(?:\/[A-Za-z0-9._-]+)+\.[A-Za-z0-9_-]+/g;
-const SUPPORTED_LOG_EXTENSIONS = [".jsonl", ".ndjson"];
+const SIDEBAR_WIDTH_STORAGE_KEY = "logtool.sidebarWidth";
+const DEFAULT_SIDEBAR_WIDTH = 280;
+const MIN_SIDEBAR_WIDTH = 220;
+const MAX_SIDEBAR_WIDTH = 720;
+const MIN_MAIN_PANEL_WIDTH = 320;
+const MOBILE_LAYOUT_MAX_WIDTH = 1100;
 
 const dom = {
+  layout: document.getElementById("layout"),
+  sidebarResizeHandle: document.getElementById("sidebarResizeHandle"),
   logDirPath: document.getElementById("logDirPath"),
   chooseDirButton: document.getElementById("chooseDirButton"),
-  directoryInput: document.getElementById("directoryInput"),
   serverFiles: document.getElementById("serverFiles"),
   refreshButton: document.getElementById("refreshButton"),
   uploadInput: document.getElementById("uploadInput"),
@@ -58,51 +61,44 @@ window.addEventListener("DOMContentLoaded", () => {
 });
 
 function bindEvents() {
+  bindSidebarResizeEvents();
+
   dom.refreshButton.addEventListener("click", async () => {
-      await withButtonProgress(dom.refreshButton, async () => {
-          await refreshServerFiles();
-      });
+    await withButtonProgress(dom.refreshButton, async () => {
+      await refreshServerFiles();
+      await reloadLoadedServerSessions();
+      renderAll();
+    });
   });
 
-  if (dom.chooseDirButton && dom.directoryInput) {
+  if (dom.chooseDirButton) {
     dom.chooseDirButton.addEventListener("click", async () => {
+      const originalLabel = dom.chooseDirButton.textContent;
+      dom.chooseDirButton.disabled = true;
+      dom.chooseDirButton.textContent = "Choosing...";
+
       try {
-        const usedNativePicker = await pickDirectoryWithNativePicker();
-        if (!usedNativePicker) {
-          dom.directoryInput.value = "";
-          dom.directoryInput.click();
-        }
-      } catch (error) {
-        if (error instanceof DOMException && error.name === "AbortError") {
+        const changed = await pickServerLogDir();
+        if (!changed) {
+          dom.chooseDirButton.textContent = originalLabel;
+          dom.chooseDirButton.disabled = false;
           return;
         }
-        showMessage(
-          `Failed to open directory picker: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
-    });
-    dom.directoryInput.addEventListener("change", async (event) => {
-      const input = event.currentTarget;
-      if (!(input instanceof HTMLInputElement) || !input.files) {
-        return;
-      }
-      try {
-        const selectedFiles = [...input.files];
-        const entries = selectedFiles.map((file) => ({
-          file,
-          relativePath: String(file.webkitRelativePath || file.name),
-        }));
-        const top = entries
-          .map((entry) => entry.relativePath.split("/")[0])
-          .filter(Boolean)[0];
-        state.currentDirectoryHandle = null;
-        await loadSelectedLocalDirectory(entries, top || "Selected directory");
+
+        dom.chooseDirButton.textContent = "Done";
+        window.setTimeout(() => {
+          dom.chooseDirButton.textContent = originalLabel;
+          dom.chooseDirButton.disabled = false;
+        }, 850);
       } catch (error) {
+        dom.chooseDirButton.textContent = "Failed";
+        window.setTimeout(() => {
+          dom.chooseDirButton.textContent = originalLabel;
+          dom.chooseDirButton.disabled = false;
+        }, 1200);
         showMessage(
-          `Failed to load selected directory: ${error instanceof Error ? error.message : String(error)}`,
+          `Failed to choose log root: ${error instanceof Error ? error.message : String(error)}`,
         );
-      } finally {
-        input.value = "";
       }
     });
   }
@@ -217,15 +213,160 @@ function bindEvents() {
 }
 
 async function initialize() {
+  initializeSidebarWidth();
   await refreshServerFiles();
+  await loadInitialServerFiles();
+  renderAll();
+}
 
-  for (const file of state.serverFiles) {
-    await loadServerFile(file.name, {
-      activate: state.activeSessionId == null,
-    });
+function bindSidebarResizeEvents() {
+  if (!dom.sidebarResizeHandle) {
+    return;
   }
 
-  renderAll();
+  dom.sidebarResizeHandle.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0) {
+      return;
+    }
+    if (window.innerWidth <= MOBILE_LAYOUT_MAX_WIDTH) {
+      return;
+    }
+
+    event.preventDefault();
+    const handle = dom.sidebarResizeHandle;
+    handle.setPointerCapture(event.pointerId);
+    document.body.classList.add("is-resizing");
+
+    const updateFromPointer = (clientX) => {
+      applySidebarWidth(clientX);
+    };
+
+    updateFromPointer(event.clientX);
+
+    const stopResize = () => {
+      document.body.classList.remove("is-resizing");
+      handle.removeEventListener("pointermove", onPointerMove);
+      handle.removeEventListener("pointerup", onPointerUp);
+      handle.removeEventListener("pointercancel", onPointerUp);
+    };
+
+    const onPointerMove = (moveEvent) => {
+      updateFromPointer(moveEvent.clientX);
+    };
+
+    const onPointerUp = () => {
+      stopResize();
+    };
+
+    handle.addEventListener("pointermove", onPointerMove);
+    handle.addEventListener("pointerup", onPointerUp);
+    handle.addEventListener("pointercancel", onPointerUp);
+  });
+
+  dom.sidebarResizeHandle.addEventListener("keydown", (event) => {
+    if (window.innerWidth <= MOBILE_LAYOUT_MAX_WIDTH) {
+      return;
+    }
+
+    let nextWidth = getSidebarWidth();
+    if (event.key === "ArrowLeft") {
+      nextWidth -= event.shiftKey ? 40 : 20;
+    } else if (event.key === "ArrowRight") {
+      nextWidth += event.shiftKey ? 40 : 20;
+    } else if (event.key === "Home") {
+      nextWidth = MIN_SIDEBAR_WIDTH;
+    } else if (event.key === "End") {
+      nextWidth = getSidebarBounds().max;
+    } else {
+      return;
+    }
+
+    event.preventDefault();
+    setSidebarWidth(nextWidth);
+  });
+
+  window.addEventListener("resize", () => {
+    if (window.innerWidth > MOBILE_LAYOUT_MAX_WIDTH) {
+      setSidebarWidth(getSidebarWidth());
+    }
+  });
+}
+
+function initializeSidebarWidth() {
+  setSidebarWidth(readStoredSidebarWidth() ?? DEFAULT_SIDEBAR_WIDTH);
+}
+
+function applySidebarWidth(clientX) {
+  const layoutRect = dom.layout?.getBoundingClientRect();
+  if (!layoutRect) {
+    return;
+  }
+  setSidebarWidth(clientX - layoutRect.left);
+}
+
+function setSidebarWidth(width) {
+  const bounds = getSidebarBounds();
+  const nextWidth = clampNumber(width, bounds.min, bounds.max);
+  document.documentElement.style.setProperty(
+    "--sidebar-width",
+    `${nextWidth}px`,
+  );
+  if (dom.sidebarResizeHandle) {
+    dom.sidebarResizeHandle.setAttribute("aria-valuenow", String(nextWidth));
+    dom.sidebarResizeHandle.setAttribute("aria-valuemax", String(bounds.max));
+  }
+  storeSidebarWidth(nextWidth);
+}
+
+function getSidebarWidth() {
+  const width = parseInt(
+    getComputedStyle(document.documentElement).getPropertyValue("--sidebar-width"),
+    10,
+  );
+  return Number.isFinite(width) ? width : DEFAULT_SIDEBAR_WIDTH;
+}
+
+function getSidebarBounds() {
+  const layoutWidth = dom.layout?.clientWidth || window.innerWidth || 0;
+  const handleWidth = dom.sidebarResizeHandle?.offsetWidth || 0;
+  const maxFromLayout = Math.max(
+    MIN_SIDEBAR_WIDTH,
+    layoutWidth - handleWidth - MIN_MAIN_PANEL_WIDTH,
+  );
+  return {
+    min: MIN_SIDEBAR_WIDTH,
+    max: Math.min(MAX_SIDEBAR_WIDTH, maxFromLayout),
+  };
+}
+
+function readStoredSidebarWidth() {
+  try {
+    const stored = window.localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY);
+    if (!stored) {
+      return null;
+    }
+    const value = Number.parseInt(stored, 10);
+    return Number.isFinite(value) ? value : null;
+  } catch (_error) {
+    return null;
+  }
+}
+
+function storeSidebarWidth(width) {
+  try {
+    window.localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(width));
+  } catch (_error) {
+    // Ignore localStorage failures; the resize still works for the current session.
+  }
+}
+
+function applyServerFilesPayload(payload) {
+  state.serverLogDir = typeof payload?.log_dir === "string" ? payload.log_dir : "";
+  state.logDir =
+    typeof payload?.root_dir === "string" && payload.root_dir
+      ? payload.root_dir
+      : state.serverLogDir;
+  state.serverFiles = Array.isArray(payload?.files) ? payload.files : [];
 }
 
 async function refreshServerFiles() {
@@ -236,11 +377,7 @@ async function refreshServerFiles() {
     }
 
     const payload = await response.json();
-    state.serverLogDir = payload.log_dir || "";
-    state.serverFiles = Array.isArray(payload.files) ? payload.files : [];
-    if (state.fileListMode === "server") {
-      state.logDir = state.serverLogDir;
-    }
+    applyServerFilesPayload(payload);
   } catch (error) {
     showMessage(
       `Failed to read log directory listing: ${error instanceof Error ? error.message : String(error)}`,
@@ -251,160 +388,58 @@ async function refreshServerFiles() {
   renderServerFiles();
 }
 
-async function pickDirectoryWithNativePicker() {
-  if (typeof window.showDirectoryPicker !== "function") {
+async function loadInitialServerFiles() {
+  const initialFiles = state.serverFiles.filter((file) => file.auto_load);
+  const filesToLoad = initialFiles.length ? initialFiles : state.serverFiles;
+
+  for (const file of filesToLoad) {
+    await loadServerFile(file, {
+      activate: state.activeSessionId == null,
+    });
+  }
+}
+
+async function pickServerLogDir() {
+  const response = await fetch("/api/pick-log-dir", {
+    method: "POST",
+  });
+
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(payload.error || `HTTP ${response.status}`);
+  }
+  if (payload.cancelled) {
     return false;
   }
 
-  const pickerOptions = {
-    id: "logtool-directory",
-    mode: "read",
-  };
-  if (state.currentDirectoryHandle) {
-    pickerOptions.startIn = state.currentDirectoryHandle;
-  }
-
-  const handle = await window.showDirectoryPicker(pickerOptions);
-  state.currentDirectoryHandle = handle;
-
-  const entries = await collectFilesFromDirectoryHandle(handle);
-  await loadSelectedLocalDirectory(
-    entries,
-    handle.name || "Selected directory",
-  );
+  resetLoadedSessions();
+  applyServerFilesPayload(payload);
+  await loadInitialServerFiles();
+  renderAll();
   return true;
 }
 
-async function collectFilesFromDirectoryHandle(directoryHandle) {
-  const out = [];
-
-  const logsHandle = await getChildDirectory(directoryHandle, "logs");
-  if (!logsHandle) {
-    return out;
-  }
-
-  for (const modelName of ["model_a", "model_b"]) {
-    const modelHandle = await getChildDirectory(logsHandle, modelName);
-    if (!modelHandle) {
-      continue;
-    }
-    const nested = await collectFilesRecursively(
-      modelHandle,
-      `logs/${modelName}`,
-    );
-    out.push(...nested);
-  }
-
-  return out;
-}
-
-async function getChildDirectory(parentHandle, name) {
-  try {
-    return await parentHandle.getDirectoryHandle(name);
-  } catch (_error) {
-    return null;
-  }
-}
-
-async function collectFilesRecursively(directoryHandle, basePath) {
-  const out = [];
-  for await (const [name, entry] of directoryHandle.entries()) {
-    const relativePath = `${basePath}/${name}`;
-    if (entry.kind === "directory") {
-      if (name.toLowerCase() === "original_sessions") {
-        continue;
-      }
-      const nested = await collectFilesRecursively(entry, relativePath);
-      out.push(...nested);
-      continue;
-    }
-
-    if (entry.kind === "file") {
-      const file = await entry.getFile();
-      out.push({ file, relativePath });
-    }
-  }
-  return out;
-}
-
-function applyLocalDirectorySelection(
-  fileEntries,
-  directoryLabel = "Selected directory",
-) {
-  const localFiles = fileEntries
-    .filter((entry) => isEligibleLogFilePath(entry.relativePath))
-    .map((entry) => {
-      const file = entry.file;
-      const relativePath = normalizeLogRelativePath(
-        entry.relativePath || file.name,
-      );
-      return {
-        source: "local",
-        name: relativePath,
-        file,
-        size_bytes: file.size || 0,
-        modified_at: new Date(file.lastModified || Date.now()).toISOString(),
-      };
-    })
-    .sort((a, b) => a.name.localeCompare(b.name));
-
-  state.fileListMode = "local";
-  state.localFiles = localFiles;
-  state.logDir = `Local selection: ${directoryLabel}`;
-}
-
-function isEligibleLogFilePath(relativePath) {
-  const normalized = normalizeLogRelativePath(relativePath).toLowerCase();
-    const hasSupportedExtension = SUPPORTED_LOG_EXTENSIONS.some((ext) =>
-        normalized.endsWith(ext),
-    );
-    if (!hasSupportedExtension) {
-    return false;
-  }
-
-  const fileName = normalized.split("/").pop() || "";
-    const fileStem = fileName.replace(/\.(jsonl|ndjson)$/i, "");
-  if (fileStem.endsWith("_raw")) {
-    return false;
-  }
-
-  if (normalized.includes("/original_sessions/")) {
-    return false;
-  }
-
-  return (
-    normalized.startsWith("logs/model_a/") ||
-    normalized.startsWith("logs/model_b/")
+async function reloadLoadedServerSessions() {
+  const loadedServerSessions = [...state.sessions.values()].filter(
+    (session) => session.source === "server" && session.serverFileId,
   );
-}
+  if (!loadedServerSessions.length) {
+    return;
+  }
 
-function normalizeLogRelativePath(relativePath) {
-  const normalized = String(relativePath || "").replace(/\\/g, "/");
-  const parts = normalized.split("/").filter(Boolean);
+  const filesById = new Map(
+    state.serverFiles.map((file) => [String(file.id || file.name), file]),
+  );
 
-  for (let i = 0; i < parts.length - 2; i += 1) {
-    const head = parts[i].toLowerCase();
-    const model = parts[i + 1].toLowerCase();
-    if (head === "logs" && (model === "model_a" || model === "model_b")) {
-      return parts.slice(i).join("/");
+  for (const session of loadedServerSessions) {
+    const file = filesById.get(String(session.serverFileId));
+    if (!file) {
+      continue;
     }
+    await loadServerFile(file, {
+      activate: state.activeSessionId === session.id,
+    });
   }
-
-  return parts.join("/");
-}
-
-async function loadSelectedLocalDirectory(
-  fileEntries,
-  directoryLabel = "Selected directory",
-) {
-  applyLocalDirectorySelection(fileEntries, directoryLabel);
-  resetLoadedSessions();
-
-  for (const file of state.localFiles) {
-    await loadLocalFile(file, { activate: state.activeSessionId == null });
-  }
-
-  renderAll();
 }
 
 function resetLoadedSessions() {
@@ -420,30 +455,19 @@ function resetLoadedSessions() {
   state.turnViewModeByKey = {};
 }
 
-function getDisplayedFiles() {
-  if (state.fileListMode === "local") {
-    return state.localFiles;
-  }
-  return state.serverFiles.map((file) => ({ ...file, source: "server" }));
-}
-
 function renderServerFiles() {
   dom.logDirPath.textContent = state.logDir || "-";
   dom.serverFiles.innerHTML = "";
-  const displayedFiles = getDisplayedFiles();
 
-  if (displayedFiles.length === 0) {
+  if (state.serverFiles.length === 0) {
     const empty = document.createElement("div");
     empty.className = "empty";
-    empty.textContent =
-      state.fileListMode === "local"
-          ? "No JSONL/NDJSON files found in selected local directory."
-          : "No JSONL/NDJSON files found in log directory.";
+    empty.textContent = "No JSONL/NDJSON files found under the current root.";
     dom.serverFiles.appendChild(empty);
     return;
   }
 
-  for (const file of displayedFiles) {
+  for (const file of state.serverFiles) {
     const row = document.createElement("div");
     row.className = "file-row";
 
@@ -453,68 +477,44 @@ function renderServerFiles() {
 
     const meta = document.createElement("div");
     meta.className = "file-meta";
-    meta.textContent = `${formatBytes(file.size_bytes)}  |  ${formatTimestamp(file.modified_at)}`;
+    const sourceLabel = file.source_label ? `  |  ${file.source_label}` : "";
+    meta.textContent = `${formatBytes(file.size_bytes)}  |  ${formatTimestamp(file.modified_at)}${sourceLabel}`;
 
     const actions = document.createElement("div");
     actions.className = "file-actions";
 
     const loadButton = document.createElement("button");
-    const sessionId =
-      file.source === "local"
-        ? localSessionId(file.name, file.file?.lastModified || 0)
-        : serverSessionId(file.name);
+    const sessionId = serverSessionId(file.id || file.name);
     const loaded = state.sessions.has(sessionId);
     loadButton.textContent = loaded ? "Reload" : "Load";
     loadButton.addEventListener("click", async () => {
       await withButtonProgress(loadButton, async () => {
-        if (file.source === "local") {
-          await loadLocalFile(file, { activate: true });
-        } else {
-          await loadServerFile(file.name, { activate: true });
-        }
+        await loadServerFile(file, { activate: true });
         renderAll();
       });
     });
 
     actions.appendChild(loadButton);
 
-    if (loaded) {
-      const status = document.createElement("span");
-      status.className = "badge";
-      status.textContent = "Loaded";
-      actions.appendChild(status);
-    }
-
     row.append(name, meta, actions);
     dom.serverFiles.appendChild(row);
   }
 }
 
-async function loadLocalFile(entry, options = { activate: false }) {
-  const sourceFile = entry?.file;
-  if (!(sourceFile instanceof File)) {
-    throw new Error(
-      "Selected local file is no longer available. Choose the directory again.",
-    );
-  }
-
-  const content = await sourceFile.text();
-  const id = localSessionId(entry.name, sourceFile.lastModified || 0);
-  const parsed = parseSession(id, entry.name, content, "local");
-  upsertSession(parsed, options);
-}
-
-async function loadServerFile(name, options = { activate: false }) {
-  const response = await fetch(`/api/file?name=${encodeURIComponent(name)}`, {
+async function loadServerFile(file, options = { activate: false }) {
+  const fileId = String(file?.id || file?.name || "");
+  const displayName = String(file?.name || fileId);
+  const response = await fetch(`/api/file?id=${encodeURIComponent(fileId)}`, {
     cache: "no-store",
   });
 
   if (!response.ok) {
-    throw new Error(`Unable to load ${name}: HTTP ${response.status}`);
+    throw new Error(`Unable to load ${displayName}: HTTP ${response.status}`);
   }
 
   const content = await response.text();
-  const parsed = parseSession(serverSessionId(name), name, content, "server");
+  const parsed = parseSession(serverSessionId(fileId), displayName, content, "server");
+  parsed.serverFileId = fileId;
   upsertSession(parsed, options);
 }
 
@@ -543,6 +543,7 @@ function parseSession(id, name, content, source) {
   const lines = content.split(/\r?\n/);
   const events = [];
   const parseErrors = [];
+  const hasTrailingNewline = /\r?\n$/.test(content);
 
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index];
@@ -554,6 +555,11 @@ function parseSession(id, name, content, source) {
       const raw = JSON.parse(line);
       events.push(normalizeEvent(raw, index + 1));
     } catch (error) {
+      const isTrailingPartialLine =
+        index === lines.length - 1 && !hasTrailingNewline;
+      if (isTrailingPartialLine) {
+        continue;
+      }
       parseErrors.push({
         line: index + 1,
         error: error instanceof Error ? error.message : String(error),
@@ -725,14 +731,17 @@ function normalizeEvent(raw, lineNumber) {
 
 function classifyPromptClass(raw, text) {
   const normalized = oneLine(text).toLowerCase();
+  const commandName = extractXmlTagValue(text, "command-name").toLowerCase();
+  const commandMessage = extractXmlTagValue(text, "command-message").toLowerCase();
 
   if (normalized.includes("<local-command-stdout>")) {
     return "hidden";
   }
 
   if (
-    normalized.includes("<command-name>/exit</command-name>") &&
-    normalized.includes("<command-message>exit</command-message>")
+    (commandName === "/exit" && commandMessage === "exit") ||
+    (commandName === "/compact" && commandMessage === "compact") ||
+    normalized === "/compact"
   ) {
     return "info";
   }
@@ -1499,6 +1508,11 @@ function renderSessionMeta(session, paneName) {
   );
   addMetaItem(grid, "Start", formatTimestamp(session.meta.firstTimestamp));
   addMetaItem(grid, "End", formatTimestamp(session.meta.lastTimestamp));
+  addMetaItem(
+    grid,
+    "Total Time",
+    formatSessionDuration(session.meta.firstTimestamp, session.meta.lastTimestamp),
+  );
   addMetaItem(grid, "Models", session.meta.modelNames.join(", ") || "-");
   addMetaItem(grid, "Model Lanes", session.meta.modelLanes.join(", ") || "-");
   addMetaItem(grid, "Task IDs", session.meta.taskIds.join(", ") || "-");
@@ -2576,6 +2590,26 @@ function addMetaItem(grid, key, value) {
   grid.append(k, v);
 }
 
+function formatSessionDuration(startTimestamp, endTimestamp) {
+  const start = Date.parse(startTimestamp || "");
+  const end = Date.parse(endTimestamp || "");
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) {
+    return "-";
+  }
+
+  const totalMinutes = Math.round((end - start) / 60000);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+
+  if (hours > 0 && minutes > 0) {
+    return `${hours}hr ${minutes}mins`;
+  }
+  if (hours > 0) {
+    return `${hours}hr`;
+  }
+  return `${minutes}mins`;
+}
+
 function makeBadge(text, kind = "") {
   const badge = document.createElement("span");
   badge.className = `badge ${kind}`.trim();
@@ -3023,13 +3057,14 @@ function normalizeCompareSelection() {
   }
 }
 
-function serverSessionId(name) {
-  return `server:${name}`;
+function clampNumber(value, min, max) {
+  return Math.min(Math.max(value, min), max);
 }
 
-function localSessionId(name, stamp) {
-  return `local:${name}:${stamp}`;
+function serverSessionId(fileId) {
+  return `server:${fileId}`;
 }
+
 
 async function copyToClipboard(text) {
   const payload = String(text ?? "");
